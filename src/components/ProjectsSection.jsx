@@ -36,7 +36,7 @@ const ProjectsSection = () => {
     <section id="projects" className="py-20 bg-gray-50">
       <div className="container mx-auto px-6">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-4xl font-bold text-center mb-16 text-gray-800">Featured Projects</h2>
+          <h2 className="text-4xl font-bold text-center mb-16 text-gray-800">Projects</h2>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {projects.map((project, index) => (
@@ -44,11 +44,11 @@ const ProjectsSection = () => {
             ))}
           </div>
           
-          <div className="text-center mt-12">
+          {/* <div className="text-center mt-12">
             <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition-colors">
               View All Projects
             </button>
-          </div>
+          </div> */}
         </div>
       </div>
     </section>

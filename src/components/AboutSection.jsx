@@ -38,12 +38,12 @@ const AboutSection = () => {
               </p>
               
               <div>
-                <h4 className="text-lg font-semibold mb-4 text-gray-800">Technologies I Work With</h4>
+                <h4 className="text-lg text-center font-semibold mb-4 text-gray-800">Technologies I Work With:</h4>
                 <div className="flex flex-wrap justify-center gap-2">
                   {skills.map((skill) => (
                     <span
                       key={skill}
-                      className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm"
+                      className="bg-indigo-100 text-black px-3 py-1 rounded-full text-sm"
                     >
                       {skill}
                     </span>

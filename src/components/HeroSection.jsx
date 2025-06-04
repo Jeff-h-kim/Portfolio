@@ -21,7 +21,7 @@ const HeroSection = () => {
       {/* Dynamic Background */}
       <DynamicBackground 
         className="z-0"
-        style={{ background: 'linear-gradient(135deg, #f0f9ff 0%, #faf5ff 100%)' }}
+        style={{ background: 'linear-gradient(135deg, #d4eeff 10%, #faf5ff 60%)' }}
       />
       
       {/* Content Overlay */}
@@ -40,14 +40,14 @@ const HeroSection = () => {
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button 
               onClick={scrollToProjects}
-              className="!bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
+              className=" bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-3 rounded-lg hover: transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
             >
               View My Work
             </button>
             
             <button 
               onClick={downloadCV}
-              className="border !border-gray-300 !text-gray-700 px-8 py-3 rounded-lg hover:border-gray-600 hover:bg-white hover:shadow-lg transition-all duration-300 transform hover:scale-105 backdrop-blur-sm bg-white/80"
+              className="border border-gray-300 text-gray-700 px-8 py-3 rounded-lg hover:border-gray-400 hover:bg-white hover:shadow-lg transition-all duration-300 transform hover:scale-105 backdrop-blur-sm bg-white/80"
             >
               Download CV
             </button>

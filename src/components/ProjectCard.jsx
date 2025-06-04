@@ -30,26 +30,21 @@ const ProjectCard = ({ title, description, tech, image, gif, link, github }) => 
           {tech.map((item) => (
             <span
               key={item}
-              className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm"
+              className="bg-gray-200 text-gray-700 px-2 py-1 rounded text-sm"
             >
               {item}
             </span>
           ))}
         </div>
         
-        <div className="flex gap-4">
-          {link && (
-            <button className="flex items-center gap-2 !text-blue-600 hover:!text-blue-700 !transition-colors">
-              <ExternalLink size={16} />
-              Live Demo
-            </button>
-          )}
+        <div className="flex justify-center gap-4">
+          
           {github && (
             <a 
               href={github} 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center gap-2 !text-gray-500 hover:!text-gray-800 !transition-colors"
+              className="flex items-center gap-2 text-indigo-500 hover:text-gray-800 transition-colors"
             >
               <Github size={16} />
               Source Code

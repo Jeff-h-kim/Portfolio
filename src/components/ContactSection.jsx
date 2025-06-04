@@ -74,10 +74,10 @@ const ContactSection = () => {
                 <div className="flex items-center gap-4">
                   <a
                     href="mailto:jeffkim6511@gmail.com"
-                    className="flex items-center gap-2 text-gray-700 hover:text-black transition-colors"
+                    className="flex items-center gap-2 text-gray-600 hover:text-black transition-colors border border-gray-500 px-4 py-2 rounded-full"
                   >
-                    <Mail className="text-blue-600" size={20} />
-                    <span className="text-gray-700">jeffkim6511@gmail.com</span>
+                    <Mail className="text-indigo-500" size={20} />
+                    <span className="text-grey-600">jeffkim6511@gmail.com</span>
                   </a>
                 </div>
                 <div className="flex items-center gap-4">
@@ -85,10 +85,10 @@ const ContactSection = () => {
                     href="https://www.linkedin.com/in/jeff-kim/"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-gray-700 hover:text-black transition-colors"
+                    className="flex items-center gap-2 text-gray-600 hover:text-black transition-colors border border-gray-500 px-4 py-2 rounded-full"
                   >
-                    <Linkedin className="text-blue-600" size={20} />
-                    <span className="text-gray-700">linkedin.com/in/jeff-kim</span>
+                    <Linkedin className="text-indigo-500" size={20} />
+                    <span className="text-grey-600">linkedin.com/in/jeff-kim</span>
                   </a>
                 </div>
                 <div className="flex items-center gap-4">
@@ -96,10 +96,10 @@ const ContactSection = () => {
                     href="https://github.com/Jeffkim6511"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-gray-700 hover:text-black transition-colors"
+                    className="flex items-center gap-2 text-gray-600 hover:text-black transition-colors border border-gray-500 px-4 py-2 rounded-full"
                   >
-                    <Github className="text-blue-600" size={20} />
-                    <span className="text-gray-700">github.com/Jeffkim6511</span>
+                    <Github className="text-indigo-500" size={20} />
+                    <span className="text-grey-600">github.com/Jeffkim6511</span>
                   </a>
                 </div>
               </div>
@@ -144,7 +144,7 @@ const ContactSection = () => {
               
               <button
                 type="submit"
-                className="w-full !bg-blue-600 !text-white py-3 rounded-lg hover:!bg-blue-800 !transition-colors"
+                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 rounded-lg hover: transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
               >
                 Send Message
               </button>
