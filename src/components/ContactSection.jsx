@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Mail, Linkedin, Github } from 'lucide-react';
 import emailjs from '@emailjs/browser';
 
-// Initialize EmailJS - add this line
 emailjs.init('9ipM6QCRhwW5f5Pho');
 
 const ContactSection = () => {
