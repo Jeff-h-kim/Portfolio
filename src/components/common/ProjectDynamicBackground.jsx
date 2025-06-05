@@ -7,7 +7,6 @@ const DynamicBackground = ({ className = "", style = {} }) => {
   useEffect(() => {
     if (!mountRef.current) return;
 
-    // Basic setup
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ alpha: true });
@@ -15,7 +14,6 @@ const DynamicBackground = ({ className = "", style = {} }) => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000, 0);
     
-    // Enable tone mapping for better glow rendering
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     
@@ -76,12 +74,12 @@ const DynamicBackground = ({ className = "", style = {} }) => {
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
     const material = new THREE.PointsMaterial({
-      size: 8, // Base size (will be modified by vertex shader)
+      size: 8, // Base size
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
       blending: THREE.AdditiveBlending,
-      sizeAttenuation: true  // Enable distance-based size attenuation for 3D effect
+      sizeAttenuation: true
     });
 
     const particles = new THREE.Points(geometry, material);
@@ -98,7 +96,7 @@ const DynamicBackground = ({ className = "", style = {} }) => {
       const positions = particles.geometry.attributes.position.array;
       const time = Date.now() * 0.001;
       
-      // Generate wind forces (multiple layers of noise for realism)
+      // Generate wind forces
       const windStrengthX = Math.sin(time * 0.5) * 0.8 + Math.sin(time * 1.3) * 0.4;
       const windStrengthY = Math.cos(time * 0.3) * 0.3 + Math.sin(time * 0.8) * 0.2;
       const gustiness = Math.sin(time * 2.1) * 0.5 + 0.5; // 0 to 1 gust factor
@@ -121,7 +119,7 @@ const DynamicBackground = ({ className = "", style = {} }) => {
         velocities[i * 3] += windForceX * 0.02;     // Wind affects horizontal movement
         velocities[i * 3 + 1] += windForceY * 0.01; // Wind can slow/speed falling
         
-        // Apply gravity (constant downward force)
+        // Apply gravity
         velocities[i * 3 + 1] -= 0.01;
         
         // Air resistance (velocity dampening)

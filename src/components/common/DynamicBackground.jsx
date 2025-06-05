@@ -39,7 +39,7 @@ const DynamicBackground = ({ className = "", style = {} }) => {
 
     const material = new THREE.PointsMaterial({
       size: 4,
-      vertexColors: true,  // Enable per-vertex colors
+      vertexColors: true,
       transparent: true,
       opacity: 0.8
     });
@@ -55,8 +55,8 @@ const DynamicBackground = ({ className = "", style = {} }) => {
       // Move all particles in same direction
       const positions = particles.geometry.attributes.position.array;
       for (let i = 0; i < particleCount; i++) {
-        positions[i * 3] += 0.5;     // Move right
-        positions[i * 3 + 1] += 0.2; // Move up slightly
+        positions[i * 3] += 0.5;     // Move right and up 
+        positions[i * 3 + 1] += 0.2;
         
         // Reset when off screen
         if (positions[i * 3] > 500) {
