@@ -176,7 +176,7 @@ const DynamicBackground = ({ className = "", style = {} }) => {
       ref={mountRef} 
       className={`fixed inset-0 w-full h-full ${className}`}
       style={{
-        background: 'linear-gradient(to bottom, #edfffe 80%, #d4fcdd 100%)', // Gradient background
+        background: 'linear-gradient(to bottom, #d4eeff 10%, #faf5ff 60%)', // Gradient background
         pointerEvents: 'none',
         zIndex: -1,
         ...style,
