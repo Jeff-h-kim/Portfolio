@@ -1,5 +1,5 @@
-import resumePDF from '../assets/Jeff_Kim_Resume_2025.pdf';
-import DynamicBackground from './DynamicBackground';
+import resumePDF from '../../assets/Jeff_Kim_Resume_2025.pdf';
+import DynamicBackground from '../common/DynamicBackground';
 
 const HeroSection = () => {
   const scrollToProjects = () => {
@@ -17,7 +17,7 @@ const HeroSection = () => {
   };
 
   return (
-    <section id="home" className="min-h-screen flex items-center justify-center relative overflow-hidden">
+    <section id="home" className="min-h-screen flex items-center justify-center relative overflow-hidden pt-28 md:pt-24">
       {/* Dynamic Background */}
       <DynamicBackground 
         className="z-0"

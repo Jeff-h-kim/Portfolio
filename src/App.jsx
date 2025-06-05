@@ -1,23 +1,24 @@
 import { useState } from 'react'
 import './App.css'
-import Header from './components/Header';
-import HeroSection from './components/HeroSection';
-import AboutSection from './components/AboutSection';
-import ProjectsSection from './components/ProjectsSection';
-import ContactSection from './components/ContactSection';
-import Footer from './components/Footer';
+import HomePage from './components/pages/HomePage.jsx'
+import AllProjectsPage from './components/pages/AllProjectsPage.jsx'
 
 const App = () => {
-  const [activeSection, setActiveSection] = useState('Home');
+  const [currentPage, setCurrentPage] = useState('home');
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'all-projects':
+        return <AllProjectsPage setCurrentPage={setCurrentPage} />;
+      case 'home':
+      default:
+        return <HomePage setCurrentPage={setCurrentPage} />;
+    }
+  };
 
   return (
     <div className="min-h-screen">
-      <Header activeSection={activeSection} setActiveSection={setActiveSection} />
-      <HeroSection />
-      <AboutSection />
-      <ProjectsSection />
-      <ContactSection />
-      <Footer />
+      {renderPage()}
     </div>
   );
 };

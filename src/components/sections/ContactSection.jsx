@@ -93,13 +93,13 @@ const ContactSection = () => {
                 </div>
                 <div className="flex items-center gap-4">
                   <a
-                    href="https://github.com/Jeffkim6511"
+                    href="https://github.com/Jeff-h-kim"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-2 text-gray-600 hover:text-black transition-colors border border-gray-500 px-4 py-2 rounded-full"
                   >
                     <Github className="text-indigo-500" size={20} />
-                    <span className="text-grey-600">github.com/Jeffkim6511</span>
+                    <span className="text-grey-600">github.com/Jeff-h-kim</span>
                   </a>
                 </div>
               </div>

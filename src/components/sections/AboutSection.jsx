@@ -1,4 +1,4 @@
-import headshotJPG from '../assets/headshot.jpg';
+import headshotJPG from '../../assets/headshot.jpg';
 
 const AboutSection = () => {
   const skills = [

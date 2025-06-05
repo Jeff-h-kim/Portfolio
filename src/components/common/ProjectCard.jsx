@@ -1,28 +1,30 @@
 import React from 'react';
-import { ExternalLink, Github } from 'lucide-react';
+import { Github } from 'lucide-react';
 
 const ProjectCard = ({ title, description, tech, image, gif, link, github }) => {
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow group">
-      <div className="h-48 bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-2xl font-bold relative overflow-hidden">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow group flex flex-col">
+      <div className="h-48 bg-gradient-to-br from-blue-400 to-purple-500 relative overflow-hidden">
         {gif ? (
           <img 
             src={gif}
             alt={`${title} demo`}
-            className="absolute inset-0 w-full h-full object-cover"
+            className="w-full h-full object-cover object-top"
           />
         ) : image ? (
           <img 
             src={image} 
             alt={title}
-            className="absolute inset-0 w-full h-full object-cover"
+            className="w-full h-full object-cover object-top"
           />
         ) : (
-          title.substring(0, 2)
+          <div className="flex items-center justify-center h-full text-white text-2xl font-bold">
+            {title.substring(0, 2)}
+          </div>
         )}
       </div>
-      
-      <div className="p-6">
+
+      <div className="p-6 flex-1 flex flex-col">
         <h3 className="text-xl font-semibold mb-3 text-gray-800">{title}</h3>
         <p className="text-gray-600 mb-4 leading-relaxed">{description}</p>
         
@@ -36,9 +38,9 @@ const ProjectCard = ({ title, description, tech, image, gif, link, github }) => 
             </span>
           ))}
         </div>
-        
-        <div className="flex justify-center gap-4">
-          
+
+        {/* Spacer to push source code to bottom */}
+        <div className="mt-auto pt-4 border-t border-gray-200">
           {github && (
             <a 
               href={github} 
