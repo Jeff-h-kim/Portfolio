@@ -43,7 +43,7 @@ const DynamicBackground = ({ className = "", style = {} }) => {
 
       // Initial velocities (slight random horizontal drift)
       velocities[i * 3] = (Math.random() - 0.5) * 0.5;     // x velocity
-      velocities[i * 3 + 1] = -1 - Math.random() * 2;      // y velocity (falling)
+      velocities[i * 3 + 1] = -1 - Math.random() * .5;      // y velocity (falling)
       velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.2; // z velocity
 
       // Enhanced colors with depth-based brightness
