@@ -4,6 +4,7 @@ import cyberYagaDemo from '../../assets/cyber-yaga-demo.gif'
 import floodFillDemo from '../../assets/flood-fill-demo.gif'
 import rubixCubeDemo from '../../assets/rubix-cube-demo.gif'
 import ctdDemo from '../../assets/chaotic-tower-defense-demo.gif'
+import dictionaryDemo from '../../assets/personal-dictionary-demo.gif'
 
 export const allProjects = [
     {
@@ -45,6 +46,12 @@ export const allProjects = [
     tech: ['C++', 'OpenGL', 'SDL2', 'FreeType', 'Procedural Generation'],
     gif: ctdDemo,
     github: "https://github.com/Jeff-h-kim/Chaotic-Tower-Defense"
+  },
+  {title: "PersonalDictionary",
+    description: "A Java-based DICT client that communicates with DICT.org servers using RFC 2229 to retrieve and display word definitions through a GUI.",
+    tech: ["Java", "Sockets", "TCP", "RFC 2229", "Swing", "Makefile", "DICT Protocol"],
+    gif: dictionaryDemo,
+    github: "https://github.com/Jeff-h-kim/PersonalDictionary"
   }
 ];
 
