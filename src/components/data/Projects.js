@@ -49,7 +49,7 @@ export const allProjects = [
   },
   {title: "PersonalDictionary",
     description: "A Java-based DICT client that communicates with DICT.org servers using RFC 2229 to retrieve and display word definitions through a GUI.",
-    tech: ["Java", "Sockets", "TCP", "RFC 2229", "Swing", "Makefile", "DICT Protocol"],
+    tech: ["Java", "Sockets", "TCP", "RFC 2229", "DICT Protocol"],
     gif: dictionaryDemo,
     github: "https://github.com/Jeff-h-kim/PersonalDictionary"
   }
