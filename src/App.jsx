@@ -2,6 +2,7 @@ import { useState } from 'react'
 import './App.css'
 import HomePage from './components/pages/HomePage.jsx'
 import AllProjectsPage from './components/pages/AllProjectsPage.jsx'
+import BuzzerComposerPage from './components/pages/BuzzerComposerPage.jsx'
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
@@ -10,6 +11,8 @@ const App = () => {
     switch (currentPage) {
       case 'all-projects':
         return <AllProjectsPage setCurrentPage={setCurrentPage} />;
+      case 'buzzer-composer':
+        return <BuzzerComposerPage setCurrentPage={setCurrentPage} />;
       case 'home':
       default:
         return <HomePage setCurrentPage={setCurrentPage} />;
