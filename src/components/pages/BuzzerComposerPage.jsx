@@ -582,7 +582,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
   const handleUpload = async () => {
     try {
-      const res = await fetch('http://10.0.0.130/upload', {
+      const res = await fetch('https://esp.jeffhkim.com/upload', {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'x-api-key':'esp-32-composing-key-1alJKJFHCZXV@KJsd!LKSJKS' },
         body: JSON.stringify({ tempo, treble, bass }),
