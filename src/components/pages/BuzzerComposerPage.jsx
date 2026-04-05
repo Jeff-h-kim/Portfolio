@@ -15,6 +15,39 @@ const NOTE_FREQ = {
   C6: 1046.5, D6: 1174.66, E6: 1318.51, F6: 1396.91,
 };
 
+const SEMITONE = Math.pow(2, 1/12);
+
+function getEffectiveAccidental(noteObj, keySig) {
+  if (!noteObj || noteObj.note === 'Rest') return 'natural';
+
+  const letter = noteObj.note[0];
+
+  // 🎯 MANUAL overrides FIRST
+  if (noteObj.accidental === 'sharp') return 'sharp';
+  if (noteObj.accidental === 'flat') return 'flat';
+  if (noteObj.accidental === 'natural') return 'natural';
+
+  // 🎯 "regular" OR undefined → follow key signature
+  if (keySig.sharps.includes(letter)) return 'sharp';
+  if (keySig.flats.includes(letter)) return 'flat';
+
+  return 'natural';
+}
+
+function getFrequency(noteObj, keySig) {
+  if (!noteObj || noteObj.note === 'Rest') return null;
+
+  const base = NOTE_FREQ[noteObj.note];
+  if (!base) return null;
+
+  const acc = getEffectiveAccidental(noteObj, keySig);
+
+  if (acc === 'sharp') return base * SEMITONE;
+  if (acc === 'flat') return base / SEMITONE;
+
+  return base;
+}
+
 // ─── LAYOUT CONSTANTS ─────────────────────────────────────────────────────────
 const LINE_GAP        = 14;
 const HALF_STEP       = LINE_GAP / 2;
@@ -79,7 +112,10 @@ const ARTICULATIONS = [
   {value:'reg',label:'reg'},{value:'stac',label:'stac'},{value:'lega',label:'lega'},
 ];
 const ACCIDENTALS = [
-  {value:'natural',label:'♮ nat'},{value:'sharp',label:'♯ sharp'},{value:'flat',label:'♭ flat'},
+  { value:'regular', label:'reg' },   // 👈 NEW
+  { value:'natural', label:'♮ nat' },
+  { value:'sharp',   label:'♯ sharp' },
+  { value:'flat',    label:'♭ flat' },
 ];
 const TIME_SIGS = [
   { value:'4/4', label:'4/4', beats:4 },
@@ -179,6 +215,7 @@ function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
   ctx.restore();
 }
 
+
 // ─── STAFF CANVAS ─────────────────────────────────────────────────────────────
 
 
@@ -271,6 +308,27 @@ function StaffCanvas({
       // ─── CLEF ───
       ctx.font = isT ? '60px serif' : '40px serif';
       ctx.fillText(isT ? '𝄞' : '𝄢', 10, rToY(lines[2], staffTop));
+      let keyX = MARGIN_L - 20;
+
+const accs = [
+  ...keySig.sharps.map(s => ({ type:'sharp', note:s })),
+  ...keySig.flats.map(f => ({ type:'flat', note:f }))
+];
+
+accs.forEach((acc, i) => {
+  const rowMap = isT
+    ? (acc.type === 'sharp' ? TREBLE_SHARP_ROW : TREBLE_FLAT_ROW)
+    : (acc.type === 'sharp' ? BASS_SHARP_ROW : BASS_FLAT_ROW);
+
+  const row = rowMap[acc.note];
+  if (row === undefined) return;
+
+  const y = rToY(row, staffTop);
+
+  ctx.font = '14px serif';
+  ctx.fillStyle = '#444';
+  ctx.fillText(acc.type === 'sharp' ? '♯' : '♭', keyX + i * 10, y);
+});
 
       // ─── BAR LINES ───
       for (let b = beatsPerBar; b < maxBeats; b += beatsPerBar) {
@@ -314,15 +372,24 @@ function StaffCanvas({
 
               const y = rToY(rowObj.row, staffTop);
 
-              drawNoteHead(
-                ctx,
-                x,
-                y,
-                note.duration,
-                color,
-                stemUp,
-                note.type
-              );
+              const acc = getEffectiveAccidental(note, keySig);
+
+              // Draw accidental symbol
+if (note.accidental !== 'regular') {
+  ctx.font = '14px serif';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  let symbol = '';
+if (acc === 'sharp') symbol = '♯';
+else if (acc === 'flat') symbol = '♭';
+else if (acc === 'natural') symbol = '♮';
+  ctx.fillText(symbol, x - 12, y);
+}
+
+// Draw note
+drawNoteHead(ctx, x, y, note.duration, color, stemUp, note.type);
             }
           }
 
@@ -346,7 +413,7 @@ function StaffCanvas({
       ctx.lineTo(endX, botY);
       ctx.stroke();
     }
-  }, [voicesNotes, numLines, timeSig]);
+ }, [voicesNotes, numLines, timeSig, keySig]);
 
   // ─── MOUSE ───
   const getCoords = (e) => {
@@ -528,7 +595,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   const [timeSig, setTimeSig] = useState('4/4');
   const [selDur,  setSelDur]  = useState(1.0);
   const [selArt,  setSelArt]  = useState('reg');
-  const [selAcc,  setSelAcc]  = useState('natural');
+  const [selAcc,  setSelAcc]  = useState('regular');
 
   const [treble,       setTreble]       = useState([[], [], []]);
   const [bass,         setBass]         = useState([[], [], []]);
@@ -551,13 +618,13 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     URL.revokeObjectURL(url);
   };
 
-  async function playVoice(voice, audioCtx) {
+  async function playVoice(voice, audioCtx, keySig) {
     const beatMs = 60000 / tempo;
     let t = audioCtx.currentTime;
     for (const note of voice) {
       const dur = (note.duration * beatMs) / 1000;
       if (note.note !== 'Rest') {
-        const freq = NOTE_FREQ[note.note];
+        const freq = getFrequency(note, keySig);
         if (freq) {
           const osc = audioCtx.createOscillator();
           const gain = audioCtx.createGain();
@@ -577,7 +644,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   const handlePlay = async () => {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
-    await Promise.all([...treble, ...bass].map(v => playVoice(v, audioCtx)));
+    await Promise.all([...treble, ...bass].map(v => playVoice(v, audioCtx, keySig)));
   };
 
   const handleUpload = async () => {
