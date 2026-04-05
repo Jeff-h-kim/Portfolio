@@ -679,12 +679,27 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   const [activeBass,   setActiveBass]   = useState(0);
 
   const [showPreview, setShowPreview] = useState(false);
-  const [toast,       setToast]       = useState(null);
+  const [toast, setToast] = useState(null);
+  
+  const [xApiKey, setXApiKey] = useState('');
+const [tunnelUrl, setTunnelUrl] = useState('');
 
   const showToast = (msg, type='ok') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2400);
   };
+
+  useEffect(() => {
+  const savedKey = localStorage.getItem('xApiKey');
+  const savedUrl = localStorage.getItem('tunnelUrl');
+  if (savedKey) setXApiKey(savedKey);
+  if (savedUrl) setTunnelUrl(savedUrl);
+}, []);
+
+useEffect(() => {
+  localStorage.setItem('xApiKey', xApiKey);
+  localStorage.setItem('tunnelUrl', tunnelUrl);
+}, [xApiKey, tunnelUrl]);
 
   const downloadFile = (content, filename, type='text/plain') => {
     const blob = new Blob([content], { type });
@@ -725,9 +740,17 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
   const handleUpload = async () => {
     try {
-      const res = await fetch('https://esp.jeffhkim.com/upload', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'x-api-key':'esp-32-composing-key-1alJKJFHCZXV@KJsd!LKSJKS' },
+      if (!tunnelUrl || !xApiKey) {
+  alert('Missing tunnel URL or API key');
+  return;
+}
+
+const res = await fetch(`${tunnelUrl}/upload`, {
+  method:'POST',
+  headers:{ 
+    'Content-Type':'application/json', 
+    'x-api-key': xApiKey
+  },
         body: JSON.stringify({ tempo, treble, bass }),
       });
       if (!res.ok) { alert('❌ Upload failed: ' + res.status); return; }
@@ -960,6 +983,42 @@ const addNote = useCallback((clef, vi, nd) => {
         {/* EXPORT */}
         <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'1.2rem', marginBottom:'2rem' }}>
           <SectionLabel>Export & Deploy</SectionLabel>
+          <div style={{ 
+  display: 'flex', 
+  flexDirection: 'column', 
+  gap: '0.4rem', 
+  marginBottom: '0.8rem' 
+}}>
+
+  <input
+    placeholder="Cloudflare Tunnel URL (https://...)"
+    value={tunnelUrl}
+    onChange={e => setTunnelUrl(e.target.value)}
+    style={{
+      ...M,
+      fontSize:'0.65rem',
+      padding:'0.35rem 0.5rem',
+      borderRadius:4,
+      border:`1px solid ${border}`,
+      background:'#f5f4f0'
+    }}
+  />
+
+  <input
+    placeholder="X-API Key"
+    value={xApiKey}
+    onChange={e => setXApiKey(e.target.value)}
+    style={{
+      ...M,
+      fontSize:'0.65rem',
+      padding:'0.35rem 0.5rem',
+      borderRadius:4,
+      border:`1px solid ${border}`,
+      background:'#f5f4f0'
+    }}
+  />
+
+</div>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             <Btn onClick={handleUpload}>📡 Upload to ESP</Btn>
             <Btn success onClick={downloadHeader}><Download size={11}/> Download .h</Btn>
