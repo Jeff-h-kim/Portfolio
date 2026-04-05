@@ -4,15 +4,21 @@ import { ArrowLeft, Download, Trash2 } from 'lucide-react';
 // ─── AUDIO: NOTE FREQUENCIES ───────────────────────────────────────────────
 const NOTE_FREQ = {
   G1: 49.00, A1: 55.00, B1: 61.74,
+
   C2: 65.41, D2: 73.42, E2: 82.41, F2: 87.31,
   G2: 98.00, A2: 110.00, B2: 123.47,
+
   C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61,
   G3: 196.00, A3: 220.00, B3: 246.94,
+
   C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23,
   G4: 392.00, A4: 440.00, B4: 493.88,
+
   C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46,
   G5: 783.99, A5: 880.00, B5: 987.77,
+
   C6: 1046.5, D6: 1174.66, E6: 1318.51, F6: 1396.91,
+  G6: 1567.98, A6: 1760.00, B6: 1975.53,
 };
 
 const SEMITONE = Math.pow(2, 1/12);
@@ -54,34 +60,61 @@ const HALF_STEP       = LINE_GAP / 2;
 const NOTE_W          = 52;
 const MARGIN_L        = 64;
 const MARGIN_R        = 32;
-const STAFF_TOP       = 30;
+const STAFF_TOP       = 80;
 const NOTES_PER_LINE  = 20;
 
 // ─── TREBLE ROW MAP ───────────────────────────────────────────────────────────
 const TREBLE_ROWS = [
-  { note:'F6', row:-8 }, { note:'E6', row:-7 }, { note:'D6', row:-6 },
-  { note:'C6', row:-5 }, { note:'B5', row:-4 }, { note:'A5', row:-3 },
-  { note:'G5', row:-2 }, { note:'F5', row:-1 }, { note:'E5', row:0  },
-  { note:'D5', row:1  }, { note:'C5', row:2  }, { note:'B4', row:3  },
-  { note:'A4', row:4  }, { note:'G4', row:5  }, { note:'F4', row:6  },
-  { note:'E4', row:7  }, { note:'D4', row:8  }, { note:'C4', row:9  },
+  { note:'C7', row:-13 },
+  { note:'D7', row:-12 },
+  { note:'B6', row:-11 },
+  { note:'A6', row:-10 },
+  { note:'G6', row:-9 },
+  { note:'F6', row:-8 },
+  { note:'E6', row:-7 },
+  { note:'D6', row:-6 },
+  { note:'C6', row:-5 },
+  { note:'B5', row:-4 },
+  { note:'A5', row:-3 },
+  { note:'G5', row:-2 },
+  { note:'F5', row:-1 },
+  { note:'E5', row:0 },
+  { note:'D5', row:1 },
+  { note:'C5', row:2 },
+  { note:'B4', row:3 }, // ✅ aligned
+  { note:'A4', row:4 },
+  { note:'G4', row:5 }, // ✅ correct now
+  { note:'F4', row:6 },
+  { note:'E4', row:7 },
+  { note:'D4', row:8 },
+  { note:'C4', row:9 },
   { note:'B3', row:10 },
+  { note:'A3', row:11 },
+  { note:'G3', row:12 },
 ];
 const TREBLE_LINES   = [-1, 1, 3, 5, 7];
-const TREBLE_ROW_MIN = -8;
-const TREBLE_ROW_MAX = 10;
+const TREBLE_ROW_MIN = -10;
+const TREBLE_ROW_MAX = 13;
 
 // ─── BASS ROW MAP ─────────────────────────────────────────────────────────────
 const BASS_ROWS = [
-  { note:'B3', row:0  }, { note:'A3', row:1  }, { note:'G3', row:2  },
-  { note:'F3', row:3  }, { note:'E3', row:4  }, { note:'D3', row:5  },
-  { note:'C3', row:6  }, { note:'B2', row:7  }, { note:'A2', row:8  },
-  { note:'G2', row:9  }, { note:'F2', row:10 }, { note:'E2', row:11 },
-  { note:'D2', row:12 }, { note:'C2', row:13 }, { note:'B1', row:14 },
+  { note:'G4', row:-5 },
+  { note:'F4', row:-4 },
+  { note:'E4', row:-3 },
+  { note:'D4', row:-2 },
+  { note:'C4', row:-1 },
+  { note:'B3', row:0 },
+  { note:'A3', row:1 },
+  { note:'G3', row:2 },
+  { note:'F3', row:3 },
+  { note:'E3', row:4 },
+  { note:'D3', row:5 }, // ✅ aligned
+  { note:'C3', row:6 },
+  { note:'B2', row:7 },
 ];
 const BASS_LINES   = [1, 3, 5, 7, 9];
-const BASS_ROW_MIN = 0;
-const BASS_ROW_MAX = 14;
+const BASS_ROW_MIN = -2;
+const BASS_ROW_MAX = 10;
 
 // ─── KEY SIGNATURES ───────────────────────────────────────────────────────────
 const KEY_SIGNATURES = {
@@ -140,6 +173,36 @@ function makeRestFill(beats) {
 }
 
 // ─── DRAW HELPERS ─────────────────────────────────────────────────────────────
+function drawLedgerLines(ctx, x, row, lines, rToY, staffTop, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+
+  const minLine = Math.min(...lines);
+  const maxLine = Math.max(...lines);
+
+  // Above staff
+  if (row < minLine) {
+    for (let r = minLine - 2; r >= row; r -= 2) {
+      const y = rToY(r, staffTop);
+      ctx.beginPath();
+      ctx.moveTo(x - 10, y);
+      ctx.lineTo(x + 10, y);
+      ctx.stroke();
+    }
+  }
+
+  // Below staff
+  if (row > maxLine) {
+    for (let r = maxLine + 2; r <= row; r += 2) {
+      const y = rToY(r, staffTop);
+      ctx.beginPath();
+      ctx.moveTo(x - 10, y);
+      ctx.lineTo(x + 10, y);
+      ctx.stroke();
+    }
+  }
+}
+
 function drawRest(ctx, duration, cx, midLineY, color) {
   ctx.save();
   ctx.fillStyle = color; ctx.strokeStyle = color;
@@ -172,6 +235,7 @@ function drawRest(ctx, duration, cx, midLineY, color) {
   if (dur) ctx.fillText(dur.label, cx, midLineY + 22);
   ctx.restore();
 }
+
 
 function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
   const hollow = duration >= 2.0;
@@ -217,8 +281,6 @@ function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
 
 
 // ─── STAFF CANVAS ─────────────────────────────────────────────────────────────
-
-
 function StaffCanvas({
   clef,
   voicesNotes,
@@ -233,29 +295,40 @@ function StaffCanvas({
 }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
+  const [hoverNote, setHoverNote] = useState(null);
 
   const isT = clef === 'treble';
   const rows = isT ? TREBLE_ROWS : BASS_ROWS;
   const lines = isT ? TREBLE_LINES : BASS_LINES;
-  const rowMin = isT ? TREBLE_ROW_MIN : BASS_ROW_MIN;
   const colors = isT ? TREBLE_COLORS : BASS_COLORS;
-  const stemUp = isT;
 
   const beatsPerBar = timeSig === '3/4' ? 3 : 4;
 
-  const STAFF_H = 220;
+  const STAFF_H = 260;
   const LINE_SPACING = STAFF_H + 40;
 
-  const beatsPerLine = NOTES_PER_LINE;
-
-  // total beats in piece
   const maxBeats = Math.max(
     ...voicesNotes.map(v => v.reduce((s, n) => s + n.duration, 0)),
     4
   );
 
+  const beatsPerLine = NOTES_PER_LINE;
   const numLines = Math.ceil(maxBeats / beatsPerLine);
 
+  // ✅ SINGLE SOURCE OF TRUTH
+  const getYFromRow = (row, staffTop) => {
+    const middleLine = lines[2];
+    const middleY = staffTop + (2 * LINE_GAP);
+    return middleY + (row - middleLine) * HALF_STEP;
+  };
+
+  const getRowFromY = (y, staffTop) => {
+    const middleLine = lines[2];
+    const middleY = staffTop + (2 * LINE_GAP);
+    return Math.round((y - middleY) / HALF_STEP + middleLine);
+  };
+
+  // ─── DRAW ─────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
@@ -273,31 +346,21 @@ function StaffCanvas({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const rToY = (row, staffTop) =>
-      staffTop + (row - rowMin) * HALF_STEP;
-
     for (let li = 0; li < numLines; li++) {
       const staffTop = li * LINE_SPACING + STAFF_TOP;
-      const notesX0 = MARGIN_L;
-
-      const lineStartBeat = li * beatsPerLine;
-      const beatsInThisLine = Math.min(
-        beatsPerLine,
-        maxBeats - lineStartBeat
-      );
 
       const usableWidth = W - MARGIN_L - MARGIN_R;
-
-      // 🔑 dynamic spacing
       const noteW = usableWidth / beatsPerLine;
 
-      const topY = rToY(lines[0], staffTop);
-      const botY = rToY(lines[lines.length - 1], staffTop);
-      const midY = rToY(lines[2], staffTop);
+      const lineStartBeat = li * beatsPerLine;
 
-      // ─── STAFF LINES ───
+      const topY = getYFromRow(lines[0], staffTop);
+      const botY = getYFromRow(lines[lines.length - 1], staffTop);
+      const midY = getYFromRow(lines[2], staffTop);
+
+      // staff lines
       lines.forEach(lr => {
-        const y = rToY(lr, staffTop);
+        const y = getYFromRow(lr, staffTop);
         ctx.beginPath();
         ctx.moveTo(MARGIN_L, y);
         ctx.lineTo(W - MARGIN_R, y);
@@ -305,142 +368,150 @@ function StaffCanvas({
         ctx.stroke();
       });
 
-      // ─── CLEF ───
-      ctx.font = isT ? '60px serif' : '40px serif';
-      ctx.fillText(isT ? '𝄞' : '𝄢', 10, rToY(lines[2], staffTop));
-      let keyX = MARGIN_L - 20;
+      // ─── BAR LINES ─────────────────────────────
+ctx.strokeStyle = '#888';
+ctx.lineWidth = 1;
 
-const accs = [
-  ...keySig.sharps.map(s => ({ type:'sharp', note:s })),
-  ...keySig.flats.map(f => ({ type:'flat', note:f }))
-];
+let beatCursor = 0;
+let nextBarBeat = beatsPerBar;
 
-accs.forEach((acc, i) => {
-  const rowMap = isT
-    ? (acc.type === 'sharp' ? TREBLE_SHARP_ROW : TREBLE_FLAT_ROW)
-    : (acc.type === 'sharp' ? BASS_SHARP_ROW : BASS_FLAT_ROW);
+const mainVoice = voicesNotes.reduce((a, b) =>
+  a.reduce((s,n)=>s+n.duration,0) >
+  b.reduce((s,n)=>s+n.duration,0) ? a : b
+);
 
-  const row = rowMap[acc.note];
-  if (row === undefined) return;
+mainVoice.forEach(note => {
+  const nextBeat = beatCursor + note.duration;
 
-  const y = rToY(row, staffTop);
+  // ✅ draw ALL bars crossed during this note
+  while (nextBarBeat <= nextBeat + 0.0001) {
 
-  ctx.font = '14px serif';
-  ctx.fillStyle = '#444';
-  ctx.fillText(acc.type === 'sharp' ? '♯' : '♭', keyX + i * 10, y);
+    if (
+      nextBarBeat >= lineStartBeat &&
+      nextBarBeat <= lineStartBeat + beatsPerLine
+    ) {
+      const beatInLine = nextBarBeat - lineStartBeat;
+      const x = MARGIN_L + beatInLine * noteW;
+
+      ctx.beginPath();
+      ctx.moveTo(x, topY);
+      ctx.lineTo(x, botY);
+      ctx.stroke();
+    }
+
+    nextBarBeat += beatsPerBar;
+  }
+
+  beatCursor = nextBeat;
 });
 
-      // ─── BAR LINES ───
-      for (let b = beatsPerBar; b < maxBeats; b += beatsPerBar) {
-        if (b >= lineStartBeat && b < lineStartBeat + beatsPerLine) {
-          const beatInLine = b - lineStartBeat;
-          const x = notesX0 + beatInLine * noteW;
+      // clef
+      ctx.font = isT ? '60px serif' : '40px serif';
+      ctx.fillText(isT ? '𝄞' : '𝄢', 10, getYFromRow(lines[2], staffTop));
 
-          ctx.beginPath();
-          ctx.moveTo(x, topY);
-          ctx.lineTo(x, botY);
-          ctx.strokeStyle = '#444';
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
-        }
-      }
-
-      // ─── DRAW NOTES ───
+      // notes
       voicesNotes.forEach((voice, vi) => {
         const color = colors[vi];
         let beatCursor = 0;
 
-        for (let i = 0; i < voice.length; i++) {
-          const note = voice[i];
-          const startBeat = beatCursor;
+        voice.forEach(note => {
+          if (beatCursor >= lineStartBeat + beatsPerLine) return;
 
-          if (startBeat >= lineStartBeat + beatsPerLine) break;
-
-          if (startBeat >= lineStartBeat) {
-            const beatInLine = startBeat - lineStartBeat;
-
-            const x =
-              notesX0 +
-              beatInLine * noteW +
-              noteW / 2;
+          if (beatCursor >= lineStartBeat) {
+            const beatInLine = beatCursor - lineStartBeat;
+            const x = MARGIN_L + beatInLine * noteW + noteW / 2;
 
             if (note.note === 'Rest') {
               drawRest(ctx, note.duration, x, midY, color);
             } else {
               const rowObj = rows.find(r => r.note === note.note);
-              if (!rowObj) continue;
+              if (!rowObj) return;
 
-              const y = rToY(rowObj.row, staffTop);
+              const y = getYFromRow(rowObj.row, staffTop);
 
-              const acc = getEffectiveAccidental(note, keySig);
-
-              // Draw accidental symbol
-if (note.accidental !== 'regular') {
-  ctx.font = '14px serif';
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  let symbol = '';
-if (acc === 'sharp') symbol = '♯';
-else if (acc === 'flat') symbol = '♭';
-else if (acc === 'natural') symbol = '♮';
-  ctx.fillText(symbol, x - 12, y);
-}
-
-// Draw note
-drawNoteHead(ctx, x, y, note.duration, color, stemUp, note.type);
+              drawLedgerLines(ctx, x, rowObj.row, lines, getYFromRow, staffTop, color);
+              drawNoteHead(ctx, x, y, note.duration, color, isT, note.type);
             }
           }
 
           beatCursor += note.duration;
-        }
+        });
       });
-
-      // ─── FINAL DOUBLE BAR ───
-      const endX =
-        notesX0 + beatsInThisLine * noteW;
-
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(endX - 4, topY);
-      ctx.lineTo(endX - 4, botY);
-      ctx.stroke();
-
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(endX, topY);
-      ctx.lineTo(endX, botY);
-      ctx.stroke();
     }
- }, [voicesNotes, numLines, timeSig, keySig]);
 
-  // ─── MOUSE ───
-  const getCoords = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // ─── GHOST NOTE ─────────────────────────────
+    if (hoverNote) {
+      const li = Math.floor(hoverNote.beat / beatsPerLine);
+      if (li >= numLines) return;
 
-    const line = Math.floor(y / LINE_SPACING);
-    const yInLine = y - line * LINE_SPACING;
+      const staffTop = li * LINE_SPACING + STAFF_TOP;
 
-    const row =
-      Math.round((yInLine - STAFF_TOP) / HALF_STEP) + rowMin;
+      const usableWidth = W - MARGIN_L - MARGIN_R;
+      const noteW = usableWidth / beatsPerLine;
 
-    const usableWidth = rect.width - MARGIN_L - MARGIN_R;
-    const noteW = usableWidth / NOTES_PER_LINE;
+      const beatInLine = hoverNote.beat - li * beatsPerLine;
+      const x = MARGIN_L + beatInLine * noteW + noteW / 2;
 
-    const beat =
-      Math.max(
-        0,
-        Math.floor((x - MARGIN_L) / noteW)
-      ) + line * NOTES_PER_LINE;
+      const y = getYFromRow(hoverNote.row, staffTop);
 
-    return { row, beat };
+      const color = colors[activeVoice] || '#888';
+
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+
+      drawLedgerLines(ctx, x, hoverNote.row, lines, getYFromRow, staffTop, color);
+      drawNoteHead(ctx, x, y, selDur, color, isT, selArt);
+
+      // accidental preview
+      if (selAcc !== 'regular') {
+        ctx.fillStyle = color;
+        ctx.font = '14px serif';
+
+        const symbols = { sharp: '♯', flat: '♭', natural: '♮' };
+        const sym = symbols[selAcc];
+        if (sym) ctx.fillText(sym, x - 12, y + 4);
+      }
+
+      ctx.restore();
+    }
+
+  }, [voicesNotes, hoverNote, selDur, selArt, selAcc, activeVoice]);
+
+  // ─── MOUSE ─────────────────────────────────────────────
+const getCoords = (e) => {
+  const rect = canvasRef.current.getBoundingClientRect();
+
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  const line = Math.floor(y / LINE_SPACING);
+  const staffTop = line * LINE_SPACING + STAFF_TOP;
+
+  // ✅ adjust Y relative to staff center system
+  const relativeY = y - staffTop;
+
+  const middleLine = lines[2];
+  const middleY = (2 * LINE_GAP);
+
+  const row = Math.round((relativeY - middleY) / HALF_STEP + middleLine);
+
+  const usableWidth = rect.width - MARGIN_L - MARGIN_R;
+  const noteW = usableWidth / beatsPerLine;
+
+  const rawBeat = ((x - MARGIN_L - noteW / 2) / noteW) + line * beatsPerLine;
+  const beat = Math.round(rawBeat / 0.25) * 0.25;
+
+  return { row, beat };
+};
+
+  const handleMouseMove = (e) => {
+    const c = getCoords(e);
+    setHoverNote(c);
   };
 
   const handleClick = (e) => {
     const c = getCoords(e);
+
     const rowObj = rows.find(r => r.row === c.row);
     if (!rowObj) return;
 
@@ -449,15 +520,17 @@ drawNoteHead(ctx, x, y, note.duration, color, stemUp, note.type);
       duration: selDur,
       type: selArt,
       accidental: selAcc,
-      targetSlot: c.beat
+      targetBeat: c.beat
     });
   };
 
   return (
-    <div ref={wrapRef} style={{ width: '100%', overflow: 'hidden' }}>
+    <div ref={wrapRef} style={{ width: '100%' }}>
       <canvas
         ref={canvasRef}
         onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverNote(null)}
         onContextMenu={(e) => {
           e.preventDefault();
           onDeleteNote();
@@ -487,7 +560,10 @@ function NoteList({ voices, clef, onDelete }) {
           </div>
           <div style={{ display:'flex', flexWrap:'wrap', gap:'4px', padding:'0.4rem 0.5rem' }}>
             {arr.map((n, ni) => {
-              const acc = n.accidental==='sharp'?'♯':n.accidental==='flat'?'♭':'';
+              let acc = '';
+if (n.accidental === 'sharp') acc = '♯';
+else if (n.accidental === 'flat') acc = '♭';
+else if (n.accidental === 'natural') acc = '♮';
               const isAuto = n.autoRest;
               return (
                 <div key={ni} style={{ display:'flex', flexDirection:'column', alignItems:'center',
@@ -665,7 +741,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   // targetSlot is the absolute slot index the user clicked.
   // We map that to beats by treating each existing note as occupying its own duration,
   // then fill any gap with rests before appending the new note.
-  const addNote = useCallback((clef, vi, nd) => {
+const addNote = useCallback((clef, vi, nd) => {
   const setter = clef === 'treble' ? setTreble : setBass;
 
   setter(prev => {
@@ -679,20 +755,32 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
       accidental: nd.accidental
     };
 
-    // 🎯 current beat position
-    const currentBeat = voice.reduce((s, n) => s + n.duration, 0);
+    let beatCursor = 0;
+    const newVoice = [];
+    let inserted = false;
 
-    // 🎯 clicked position → beat
-    const targetBeat = nd.targetSlot;
+    for (let note of voice) {
 
-    if (targetBeat > currentBeat) {
-      const gap = targetBeat - currentBeat;
-      const rests = makeRestFill(gap);
-      next[vi] = [...voice, ...rests, newNote];
-    } else {
-      next[vi] = [...voice, newNote];
+      // ✅ INSERT BEFORE existing note (NO RESTS)
+      if (!inserted && nd.targetBeat < beatCursor + note.duration) {
+        newVoice.push(newNote);
+        inserted = true;
+      }
+
+      newVoice.push(note);
+      beatCursor += note.duration;
     }
 
+    // ✅ If placing AFTER everything → allow rests
+    if (!inserted) {
+      if (nd.targetBeat > beatCursor) {
+        const gap = nd.targetBeat - beatCursor;
+        newVoice.push(...makeRestFill(gap));
+      }
+      newVoice.push(newNote);
+    }
+
+    next[vi] = newVoice;
     return next;
   });
 }, []);
