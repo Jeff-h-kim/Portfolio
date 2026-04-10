@@ -158,16 +158,31 @@ const TIME_SIGS = [
 const TREBLE_COLORS = ['#c8804e','#6ec88a','#6eaac8'];
 const BASS_COLORS   = ['#6eaac8','#a08bc8','#c8a96e'];
 
-// ─── BEAT HELPERS ─────────────────────────────────────────────────────────────
 // Decompose a beat duration into note-value rests (greedy, largest first)
 function makeRestFill(beats) {
   const rests = [];
   let rem = Math.round(beats * 10000) / 10000;
-  for (const u of [4.0, 2.0, 1.0, 0.5, 0.25]) {
+  // Auto-rests only use whole and half — never 8th or 16th
+  for (const u of [4.0, 2.0, 1.0]) {
     while (rem >= u - 0.0001) {
       rests.push({ note:'Rest', duration:u, type:'reg', accidental:'natural', autoRest:true });
       rem = Math.round((rem - u) * 10000) / 10000;
     }
+  }
+  return rests;
+}
+
+// Fill gap with rests of the specified duration (used when inserting between notes)
+function makeRestFillWithDuration(beats, dur) {
+  const rests = [];
+  let rem = Math.round(beats * 10000) / 10000;
+  while (rem >= dur - 0.0001) {
+    rests.push({ note:'Rest', duration:dur, type:'reg', accidental:'natural', autoRest:true });
+    rem = Math.round((rem - dur) * 10000) / 10000;
+  }
+  // Fill any leftover with standard rests
+  if (rem > 0.0001) {
+    rests.push(...makeRestFill(rem));
   }
   return rests;
 }
@@ -281,51 +296,84 @@ function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
 
 
 // ─── STAFF CANVAS ─────────────────────────────────────────────────────────────
+// Each StaffCanvas now renders a SINGLE voice (voiceNotes = array of notes).
+// notePositions: computed pixel x for each note, accounting for min spacing.
+const MIN_NOTE_PX = 28; // minimum pixels per note slot regardless of duration
+
+function computeNotePositions(voice, usableWidth, beatsPerLine, lineStartBeat) {
+  // Build slots: each note gets max(duration*beatPx, MIN_NOTE_PX)
+  const beatPx = usableWidth / beatsPerLine;
+  const positions = [];
+  let beatCursor = 0;
+  let xCursor = 0;
+
+  // First pass: assign each note a "natural" x from beat position
+  for (let i = 0; i < voice.length; i++) {
+    const note = voice[i];
+    const noteStartBeat = beatCursor;
+    const naturalX = (noteStartBeat - lineStartBeat) * beatPx;
+    const naturalW = note.duration * beatPx;
+    const slotW = Math.max(naturalW, MIN_NOTE_PX);
+    positions.push({ naturalX, slotW, beat: noteStartBeat, noteIdx: i });
+    beatCursor += note.duration;
+  }
+
+  // Second pass: push notes right if they'd overlap (enforce min gap)
+  let runningX = 0;
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+    if (p.naturalX < runningX) {
+      p.adjustedX = runningX;
+    } else {
+      p.adjustedX = p.naturalX;
+      runningX = p.naturalX;
+    }
+    runningX += p.slotW;
+  }
+
+  return positions;
+}
+
 function StaffCanvas({
   clef,
-  voicesNotes,
-  activeVoice,
+  voiceNotes,      // single voice array
+  voiceColor,      // color string
+  voiceIdx,
+  isActive,
+  eraseMode,       // boolean — left-click deletes instead of placing
   selDur,
   selArt,
   selAcc,
   keySig,
   timeSig,
   onAddNote,
-  onDeleteNote
+  onAddRest,       // (beat) => void — right-click adds rest at beat
+  onDeleteNote,
+  playingBar,
+  totalBeatsRef,   // shared ref so bar lines align across voices
 }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
-  const [hoverNote, setHoverNote] = useState(null);
+  const [hoverBeat, setHoverBeat] = useState(null); // { beat, row }
+  const [hoveredNoteIdx, setHoveredNoteIdx] = useState(null);
 
   const isT = clef === 'treble';
   const rows = isT ? TREBLE_ROWS : BASS_ROWS;
   const lines = isT ? TREBLE_LINES : BASS_LINES;
-  const colors = isT ? TREBLE_COLORS : BASS_COLORS;
 
   const beatsPerBar = timeSig === '3/4' ? 3 : 4;
+  const STAFF_H = 200;
+  const LINE_SPACING = STAFF_H + 30;
 
-  const STAFF_H = 260;
-  const LINE_SPACING = STAFF_H + 40;
-
-  const maxBeats = Math.max(
-    ...voicesNotes.map(v => v.reduce((s, n) => s + n.duration, 0)),
-    4
-  );
-
+  const totalVoiceBeats = voiceNotes.reduce((s, n) => s + n.duration, 0);
+  const maxBeats = Math.max(totalVoiceBeats, beatsPerBar);
   const beatsPerLine = NOTES_PER_LINE;
   const numLines = Math.ceil(maxBeats / beatsPerLine);
 
-  // ✅ SINGLE SOURCE OF TRUTH
   const getYFromRow = (row, staffTop) => {
     const middleLine = lines[2];
     const middleY = staffTop + (2 * LINE_GAP);
     return middleY + (row - middleLine) * HALF_STEP;
-  };
-
-  const getRowFromY = (y, staffTop) => {
-    const middleLine = lines[2];
-    const middleY = staffTop + (2 * LINE_GAP);
-    return Math.round((y - middleY) / HALF_STEP + middleLine);
   };
 
   // ─── DRAW ─────────────────────────────────────────────
@@ -346,17 +394,34 @@ function StaffCanvas({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    const usableWidth = W - MARGIN_L - MARGIN_R;
+    const beatPx = usableWidth / beatsPerLine;
+
+    // Use totalBeatsRef for bar lines so all voices show bars at same positions
+    const sharedTotalBeats = totalBeatsRef?.current ?? maxBeats;
+
     for (let li = 0; li < numLines; li++) {
       const staffTop = li * LINE_SPACING + STAFF_TOP;
-
-      const usableWidth = W - MARGIN_L - MARGIN_R;
-      const noteW = usableWidth / beatsPerLine;
-
       const lineStartBeat = li * beatsPerLine;
 
       const topY = getYFromRow(lines[0], staffTop);
       const botY = getYFromRow(lines[lines.length - 1], staffTop);
       const midY = getYFromRow(lines[2], staffTop);
+
+      // ─── PLAYING BAR HIGHLIGHT ──────────────────
+      if (playingBar !== null) {
+        const barStartBeat = playingBar * beatsPerBar;
+        if (barStartBeat >= lineStartBeat - 0.0001 && barStartBeat < lineStartBeat + beatsPerLine - 0.0001) {
+          const barX = MARGIN_L + (barStartBeat - lineStartBeat) * beatPx;
+          ctx.save();
+          ctx.fillStyle = 'rgba(200,128,78,0.11)';
+          ctx.fillRect(barX, topY - 8, beatsPerBar * beatPx, botY - topY + 16);
+          ctx.strokeStyle = 'rgba(200,128,78,0.3)';
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(barX, topY - 8, beatsPerBar * beatPx, botY - topY + 16);
+          ctx.restore();
+        }
+      }
 
       // staff lines
       lines.forEach(lr => {
@@ -364,157 +429,230 @@ function StaffCanvas({
         ctx.beginPath();
         ctx.moveTo(MARGIN_L, y);
         ctx.lineTo(W - MARGIN_R, y);
-        ctx.strokeStyle = '#aaa';
+        ctx.strokeStyle = '#bbb';
+        ctx.lineWidth = 1;
         ctx.stroke();
       });
 
-      // ─── BAR LINES ─────────────────────────────
-ctx.strokeStyle = '#888';
-ctx.lineWidth = 1;
-
-let beatCursor = 0;
-let nextBarBeat = beatsPerBar;
-
-const mainVoice = voicesNotes.reduce((a, b) =>
-  a.reduce((s,n)=>s+n.duration,0) >
-  b.reduce((s,n)=>s+n.duration,0) ? a : b
-);
-
-mainVoice.forEach(note => {
-  const nextBeat = beatCursor + note.duration;
-
-  // ✅ draw ALL bars crossed during this note
-  while (nextBarBeat <= nextBeat + 0.0001) {
-
-    if (
-      nextBarBeat >= lineStartBeat &&
-      nextBarBeat <= lineStartBeat + beatsPerLine
-    ) {
-      const beatInLine = nextBarBeat - lineStartBeat;
-      const x = MARGIN_L + beatInLine * noteW;
-
-      ctx.beginPath();
-      ctx.moveTo(x, topY);
-      ctx.lineTo(x, botY);
-      ctx.stroke();
-    }
-
-    nextBarBeat += beatsPerBar;
-  }
-
-  beatCursor = nextBeat;
-});
-
-      // clef
-      ctx.font = isT ? '60px serif' : '40px serif';
-      ctx.fillText(isT ? '𝄞' : '𝄢', 10, getYFromRow(lines[2], staffTop));
-
-      // notes
-      voicesNotes.forEach((voice, vi) => {
-        const color = colors[vi];
-        let beatCursor = 0;
-
-        voice.forEach(note => {
-          if (beatCursor >= lineStartBeat + beatsPerLine) return;
-
-          if (beatCursor >= lineStartBeat) {
-            const beatInLine = beatCursor - lineStartBeat;
-            const x = MARGIN_L + beatInLine * noteW + noteW / 2;
-
-            if (note.note === 'Rest') {
-              drawRest(ctx, note.duration, x, midY, color);
-            } else {
-              const rowObj = rows.find(r => r.note === note.note);
-              if (!rowObj) return;
-
-              const y = getYFromRow(rowObj.row, staffTop);
-
-              drawLedgerLines(ctx, x, rowObj.row, lines, getYFromRow, staffTop, color);
-              drawNoteHead(ctx, x, y, note.duration, color, isT, note.type);
-            }
-          }
-
-          beatCursor += note.duration;
-        });
-      });
-    }
-
-    // ─── GHOST NOTE ─────────────────────────────
-    if (hoverNote) {
-      const li = Math.floor(hoverNote.beat / beatsPerLine);
-      if (li >= numLines) return;
-
-      const staffTop = li * LINE_SPACING + STAFF_TOP;
-
-      const usableWidth = W - MARGIN_L - MARGIN_R;
-      const noteW = usableWidth / beatsPerLine;
-
-      const beatInLine = hoverNote.beat - li * beatsPerLine;
-      const x = MARGIN_L + beatInLine * noteW + noteW / 2;
-
-      const y = getYFromRow(hoverNote.row, staffTop);
-
-      const color = colors[activeVoice] || '#888';
-
-      ctx.save();
-      ctx.globalAlpha = 0.35;
-
-      drawLedgerLines(ctx, x, hoverNote.row, lines, getYFromRow, staffTop, color);
-      drawNoteHead(ctx, x, y, selDur, color, isT, selArt);
-
-      // accidental preview
-      if (selAcc !== 'regular') {
-        ctx.fillStyle = color;
-        ctx.font = '14px serif';
-
-        const symbols = { sharp: '♯', flat: '♭', natural: '♮' };
-        const sym = symbols[selAcc];
-        if (sym) ctx.fillText(sym, x - 12, y + 4);
+      // bar lines
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 1;
+      for (let barBeat = beatsPerBar; barBeat <= sharedTotalBeats + 0.0001; barBeat += beatsPerBar) {
+        const rb = Math.round(barBeat * 10000) / 10000;
+        if (rb > lineStartBeat - 0.0001 && rb <= lineStartBeat + beatsPerLine + 0.0001) {
+          const x = MARGIN_L + (rb - lineStartBeat) * beatPx;
+          ctx.beginPath();
+          ctx.moveTo(x, topY);
+          ctx.lineTo(x, botY);
+          ctx.stroke();
+        }
       }
 
-      ctx.restore();
+      // clef symbol
+      ctx.font = isT ? '52px serif' : '36px serif';
+      ctx.fillStyle = '#666';
+      ctx.fillText(isT ? '𝄞' : '𝄢', 10, getYFromRow(lines[2], staffTop) + (isT ? 4 : 8));
+
+      // ─── NOTES ──────────────────────────────────
+      // Compute positions with min spacing
+      const lineNotes = [];
+      let bc = 0;
+      for (let i = 0; i < voiceNotes.length; i++) {
+        const note = voiceNotes[i];
+        if (bc >= lineStartBeat + beatsPerLine) break;
+        if (bc + note.duration > lineStartBeat - 0.0001) {
+          lineNotes.push({ note, idx: i, beat: bc });
+        }
+        bc += note.duration;
+      }
+
+      // Compute adjusted x positions with min spacing
+      let xCursor = 0;
+      const noteXMap = new Map();
+      for (const ln of lineNotes) {
+        const naturalX = (ln.beat - lineStartBeat) * beatPx;
+        const slotW = Math.max(ln.note.duration * beatPx, MIN_NOTE_PX);
+        const adjustedX = Math.max(naturalX, xCursor);
+        noteXMap.set(ln.idx, MARGIN_L + adjustedX + slotW / 2);
+        xCursor = adjustedX + slotW;
+      }
+
+      for (const ln of lineNotes) {
+        if (ln.beat < lineStartBeat - 0.0001) continue;
+        const x = noteXMap.get(ln.idx);
+        if (x === undefined) continue;
+
+        const isHovered = ln.idx === hoveredNoteIdx;
+        // In erase mode hovered note = red; normal hovered note = orange highlight
+        const noteColor = isHovered
+          ? (eraseMode ? '#e55' : '#e8924e')
+          : voiceColor;
+
+        if (ln.note.note === 'Rest') {
+          drawRest(ctx, ln.note.duration, x, midY, noteColor);
+          if (isHovered) {
+            ctx.save();
+            ctx.fillStyle = eraseMode ? 'rgba(220,80,80,0.1)' : 'rgba(232,146,78,0.08)';
+            ctx.fillRect(x - 16, midY - 20, 32, 55);
+            if (eraseMode) {
+              // draw X over rest
+              ctx.strokeStyle = 'rgba(220,80,80,0.7)';
+              ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.moveTo(x-8, midY-8); ctx.lineTo(x+8, midY+8); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(x+8, midY-8); ctx.lineTo(x-8, midY+8); ctx.stroke();
+            }
+            ctx.restore();
+          }
+        } else {
+          const rowObj = rows.find(r => r.note === ln.note.note);
+          if (!rowObj) continue;
+          const y = getYFromRow(rowObj.row, staffTop);
+          drawLedgerLines(ctx, x, rowObj.row, lines, getYFromRow, staffTop, noteColor);
+          drawNoteHead(ctx, x, y, ln.note.duration, noteColor, isT, ln.note.type);
+          if (isHovered) {
+            ctx.save();
+            if (eraseMode) {
+              // Red X over note head
+              ctx.strokeStyle = 'rgba(220,80,80,0.75)';
+              ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.moveTo(x-9, y-9); ctx.lineTo(x+9, y+9); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(x+9, y-9); ctx.lineTo(x-9, y+9); ctx.stroke();
+            } else {
+              ctx.strokeStyle = 'rgba(232,146,78,0.55)';
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.ellipse(x, y, 10, 8, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+            ctx.restore();
+          }
+          // accidental
+          if (ln.note.accidental === 'sharp' || ln.note.accidental === 'flat' || ln.note.accidental === 'natural') {
+            const sym = { sharp:'♯', flat:'♭', natural:'♮' }[ln.note.accidental];
+            ctx.save();
+            ctx.fillStyle = noteColor;
+            ctx.font = '13px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(sym, x - 14, y);
+            ctx.restore();
+          }
+        }
+      }
     }
 
-  }, [voicesNotes, hoverNote, selDur, selArt, selAcc, activeVoice]);
+    // ─── GHOST NOTE / GHOST RESTS (hover preview) ────────
+    if (hoverBeat && isActive) {
+      const li = hoverBeat.li ?? Math.floor(hoverBeat.beat / beatsPerLine);
+      if (li < numLines) {
+        const staffTop = li * LINE_SPACING + STAFF_TOP;
+        const lineStartBeat = li * beatsPerLine;
+        const midY = getYFromRow(lines[2], staffTop);
+
+        // Ghost note: place center exactly at cursor rawX
+        const ghostX = hoverBeat.rawX;
+        const y = getYFromRow(hoverBeat.row, staffTop);
+
+        // Determine if we need gap-filling rests
+        const voiceEndBeat = voiceNotes.reduce((s, n) => s + n.duration, 0);
+        const gapStart = voiceEndBeat;
+        const gapEnd = hoverBeat.beat; // snapped beat for placement
+
+        ctx.save();
+        ctx.globalAlpha = 0.32;
+
+        // Draw ghost rests filling the gap (only if cursor is beyond voice end)
+        if (gapEnd > gapStart + 0.0001) {
+          const gapRests = makeRestFill(gapEnd - gapStart);
+          let restBeat = gapStart;
+          for (const gr of gapRests) {
+            // Only draw rests that fall on this line
+            if (restBeat >= lineStartBeat && restBeat < lineStartBeat + beatsPerLine) {
+              const restBeatInLine = restBeat - lineStartBeat;
+              const restSlotW = Math.max(gr.duration * beatPx, MIN_NOTE_PX);
+              const restX = MARGIN_L + restBeatInLine * beatPx + restSlotW / 2;
+              drawRest(ctx, gr.duration, restX, midY, voiceColor);
+            }
+            restBeat += gr.duration;
+          }
+        }
+
+        // Draw ghost note at cursor position
+        const rowObj = rows.find(r => r.row === hoverBeat.row);
+        if (rowObj) {
+          drawLedgerLines(ctx, ghostX, hoverBeat.row, lines, getYFromRow, staffTop, voiceColor);
+          drawNoteHead(ctx, ghostX, y, selDur, voiceColor, isT, selArt);
+          if (selAcc !== 'regular') {
+            const symbols = { sharp: '♯', flat: '♭', natural: '♮' };
+            ctx.fillStyle = voiceColor;
+            ctx.font = '14px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(symbols[selAcc] || '', ghostX - 14, y);
+          }
+        } else {
+          // Cursor is off the staff — show ghost rest instead
+          drawRest(ctx, selDur, ghostX, midY, voiceColor);
+        }
+
+        ctx.restore();
+      }
+    }
+
+  }, [voiceNotes, hoverBeat, hoveredNoteIdx, selDur, selArt, selAcc, isActive, eraseMode, playingBar]);
 
   // ─── MOUSE ─────────────────────────────────────────────
-const getCoords = (e) => {
-  const rect = canvasRef.current.getBoundingClientRect();
+  const getCoords = useCallback((e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const W = rect.width;
 
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+    const li = Math.floor(y / LINE_SPACING);
+    const staffTop = li * LINE_SPACING + STAFF_TOP;
+    const relativeY = y - staffTop;
+    const middleLine = lines[2];
+    const middleY = (2 * LINE_GAP);
+    const row = Math.round((relativeY - middleY) / HALF_STEP + middleLine);
 
-  const line = Math.floor(y / LINE_SPACING);
-  const staffTop = line * LINE_SPACING + STAFF_TOP;
+    const usableWidth = W - MARGIN_L - MARGIN_R;
+    const beatPx = usableWidth / beatsPerLine;
+    const rawBeat = ((x - MARGIN_L) / beatPx) + li * beatsPerLine;
+    const beat = Math.max(0, Math.round(rawBeat / 0.25) * 0.25);
 
-  // ✅ adjust Y relative to staff center system
-  const relativeY = y - staffTop;
+    // Find which note index is hovered
+    let hni = null;
+    let bc = 0;
+    for (let i = 0; i < voiceNotes.length; i++) {
+      const nb = bc + voiceNotes[i].duration;
+      if (beat >= bc - 0.0001 && beat < nb - 0.0001) { hni = i; break; }
+      bc = nb;
+    }
 
-  const middleLine = lines[2];
-  const middleY = (2 * LINE_GAP);
+    return { row, beat, rawX: x, li, hoveredNoteIdx: hni };
+  }, [voiceNotes, lines, beatsPerLine]);
 
-  const row = Math.round((relativeY - middleY) / HALF_STEP + middleLine);
-
-  const usableWidth = rect.width - MARGIN_L - MARGIN_R;
-  const noteW = usableWidth / beatsPerLine;
-
-  const rawBeat = ((x - MARGIN_L - noteW / 2) / noteW) + line * beatsPerLine;
-  const beat = Math.round(rawBeat / 0.25) * 0.25;
-
-  return { row, beat };
-};
-
-  const handleMouseMove = (e) => {
+  const handleMouseMove = useCallback((e) => {
     const c = getCoords(e);
-    setHoverNote(c);
-  };
+    setHoverBeat({ beat: c.beat, row: c.row, rawX: c.rawX, li: c.li });
+    setHoveredNoteIdx(c.hoveredNoteIdx);
+  }, [getCoords]);
 
-  const handleClick = (e) => {
+  const handleMouseLeave = useCallback(() => {
+    setHoverBeat(null);
+    setHoveredNoteIdx(null);
+  }, []);
+
+  const handleClick = useCallback((e) => {
+    if (!isActive) return;
     const c = getCoords(e);
-
+    if (eraseMode) {
+      // left-click in erase mode = delete hovered note
+      onDeleteNote(c.hoveredNoteIdx !== null ? c.hoveredNoteIdx : null);
+      return;
+    }
     const rowObj = rows.find(r => r.row === c.row);
     if (!rowObj) return;
-
     onAddNote({
       note: rowObj.note,
       duration: selDur,
@@ -522,20 +660,25 @@ const getCoords = (e) => {
       accidental: selAcc,
       targetBeat: c.beat
     });
-  };
+  }, [isActive, eraseMode, getCoords, rows, selDur, selArt, selAcc, onAddNote, onDeleteNote]);
+
+  const handleContextMenu = useCallback((e) => {
+    e.preventDefault();
+    if (!isActive) return;
+    const c = getCoords(e);
+    // Right-click always adds a rest at the clicked beat
+    onAddRest(c.beat);
+  }, [isActive, getCoords, onAddRest]);
 
   return (
-    <div ref={wrapRef} style={{ width: '100%' }}>
+    <div ref={wrapRef} style={{ width: '100%', opacity: isActive ? 1 : 0.7 }}>
       <canvas
         ref={canvasRef}
         onClick={handleClick}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverNote(null)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onDeleteNote();
-        }}
-        style={{ cursor: 'crosshair' }}
+        onMouseLeave={handleMouseLeave}
+        onContextMenu={handleContextMenu}
+        style={{ cursor: isActive ? (eraseMode ? 'cell' : 'crosshair') : 'default', display: 'block' }}
       />
     </div>
   );
@@ -647,21 +790,6 @@ function ToggleGroup({ options, value, onChange }) {
   );
 }
 
-function VoicePicker({ voices, active, setActive, colors }) {
-  return (
-    <div style={{ display:'flex', gap:3 }}>
-      {voices.map((v, i) => (
-        <button key={i} onClick={() => setActive(i)}
-          style={{ ...M, fontSize:'0.6rem', padding:'0.2rem 0.5rem', borderRadius:3,
-            border:`1px solid ${i===active?colors[i]:'rgba(0,0,0,0.14)'}`,
-            background:i===active?colors[i]+'22':'transparent',
-            color:i===active?colors[i]:'#888', cursor:'pointer', transition:'all .15s' }}>
-          V{i+1}{v.length?` (${v.length})`:''}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────────
 const BuzzerComposerPage = ({ setCurrentPage }) => {
@@ -677,12 +805,19 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   const [bass,         setBass]         = useState([[], [], []]);
   const [activeTreble, setActiveTreble] = useState(0);
   const [activeBass,   setActiveBass]   = useState(0);
+  // 'treble' | 'bass' — which clef is focused for keyboard voice switching
+  const [activeClef,   setActiveClef]   = useState('treble');
 
   const [showPreview, setShowPreview] = useState(false);
   const [toast, setToast] = useState(null);
-  
+  const [playingBar, setPlayingBar] = useState(null);
+  const [eraseMode, setEraseMode] = useState(false);
+
   const [xApiKey, setXApiKey] = useState('');
-const [tunnelUrl, setTunnelUrl] = useState('');
+  const [tunnelUrl, setTunnelUrl] = useState('');
+
+  // Shared ref so all voice canvases can draw bar lines at same positions
+  const totalBeatsRef = useRef(4);
 
   const showToast = (msg, type='ok') => {
     setToast({ msg, type });
@@ -690,16 +825,102 @@ const [tunnelUrl, setTunnelUrl] = useState('');
   };
 
   useEffect(() => {
-  const savedKey = localStorage.getItem('xApiKey');
-  const savedUrl = localStorage.getItem('tunnelUrl');
-  if (savedKey) setXApiKey(savedKey);
-  if (savedUrl) setTunnelUrl(savedUrl);
-}, []);
+    const savedKey = localStorage.getItem('xApiKey');
+    const savedUrl = localStorage.getItem('tunnelUrl');
+    if (savedKey) setXApiKey(savedKey);
+    if (savedUrl) setTunnelUrl(savedUrl);
+  }, []);
 
-useEffect(() => {
-  localStorage.setItem('xApiKey', xApiKey);
-  localStorage.setItem('tunnelUrl', tunnelUrl);
-}, [xApiKey, tunnelUrl]);
+  useEffect(() => {
+    localStorage.setItem('xApiKey', xApiKey);
+    localStorage.setItem('tunnelUrl', tunnelUrl);
+  }, [xApiKey, tunnelUrl]);
+
+  // Update totalBeatsRef whenever notes change
+  useEffect(() => {
+    const all = [...treble, ...bass];
+    totalBeatsRef.current = Math.max(...all.map(v => v.reduce((s,n)=>s+n.duration,0)), 4);
+  }, [treble, bass]);
+
+  // ─── KEYBOARD BINDINGS ────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      // Don't fire when typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.key) {
+        // Duration: 1=16th 2=8th 3=8th· 4=qtr 5=qtr· 6=half 7=hlf· 8=whole
+        case '1': setSelDur(0.25); showToast('16th note'); break;
+        case '2': setSelDur(0.5);  showToast('8th note'); break;
+        case '3': setSelDur(0.75); showToast('8th dotted'); break;
+        case '4': setSelDur(1.0);  showToast('Quarter note'); break;
+        case '5': setSelDur(1.5);  showToast('Quarter dotted'); break;
+        case '6': setSelDur(2.0);  showToast('Half note'); break;
+        case '7': setSelDur(3.0);  showToast('Half dotted'); break;
+        case '8': setSelDur(4.0);  showToast('Whole note'); break;
+
+        // Accidentals: n=natural, s=sharp, f=flat, r=regular
+        case 'n': setSelAcc('natural'); showToast('♮ Natural'); break;
+        case 's': setSelAcc('sharp');   showToast('♯ Sharp'); break;
+        case 'f': setSelAcc('flat');    showToast('♭ Flat'); break;
+        case 'r': setSelAcc('regular'); showToast('Regular (key sig)'); break;
+
+        // Articulations: q=regular, w=staccato, e=legato
+        case 'q': setSelArt('reg');  showToast('Articulation: Regular'); break;
+        case 'w': setSelArt('stac'); showToast('Articulation: Staccato'); break;
+        case 'e': setSelArt('lega'); showToast('Articulation: Legato'); break;
+
+        // Active clef: t=treble, b=bass
+        case 't': setActiveClef('treble'); showToast('Treble clef active'); break;
+        case 'b': setActiveClef('bass');   showToast('Bass clef active'); break;
+
+        // Voice select within active clef: [ ] \ for V1 V2 V3
+        case '[':
+          if (activeClef==='treble') setActiveTreble(0);
+          else setActiveBass(0);
+          showToast(`${activeClef} V1`); break;
+        case ']':
+          if (activeClef==='treble') setActiveTreble(1);
+          else setActiveBass(1);
+          showToast(`${activeClef} V2`); break;
+        case '\\':
+          if (activeClef==='treble') setActiveTreble(2);
+          else setActiveBass(2);
+          showToast(`${activeClef} V3`); break;
+
+        // + Rest: add rest with current duration to active voice
+        case 'x':
+          if (activeClef==='treble') addRestManual('treble', activeTreble, selDur);
+          else addRestManual('bass', activeBass, selDur);
+          break;
+
+        // Erase mode toggle: `d`
+        case 'd':
+          setEraseMode(p => { showToast(p ? 'Erase off' : '✕ Erase mode on'); return !p; });
+          break;
+
+        // Delete hovered note: Delete or Backspace = delete last in active voice
+        case 'Delete':
+        case 'Backspace':
+          e.preventDefault();
+          if (activeClef==='treble') deleteLast('treble', activeTreble, null);
+          else deleteLast('bass', activeBass, null);
+          showToast('Deleted last note');
+          break;
+
+        // Space = play
+        case ' ':
+          e.preventDefault();
+          handlePlay();
+          break;
+
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selDur, selAcc, selArt, activeClef, activeTreble, activeBass, eraseMode]);
 
   const downloadFile = (content, filename, type='text/plain') => {
     const blob = new Blob([content], { type });
@@ -735,22 +956,28 @@ useEffect(() => {
   const handlePlay = async () => {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
-    await Promise.all([...treble, ...bass].map(v => playVoice(v, audioCtx, keySig)));
+
+    const beatMs = 60000 / tempo;
+    const beatsPerBar = timeSig === '3/4' ? 3 : 4;
+    const allVoices = [...treble, ...bass];
+    const totalBeats = Math.max(...allVoices.map(v => v.reduce((s,n)=>s+n.duration,0)), beatsPerBar);
+    const totalBars = Math.ceil(totalBeats / beatsPerBar);
+
+    setPlayingBar(0);
+    for (let bar = 0; bar < totalBars; bar++) {
+      setTimeout(() => setPlayingBar(bar), bar * beatsPerBar * beatMs);
+    }
+    setTimeout(() => setPlayingBar(null), totalBars * beatsPerBar * beatMs);
+
+    await Promise.all(allVoices.map(v => playVoice(v, audioCtx, keySig)));
   };
 
   const handleUpload = async () => {
     try {
-      if (!tunnelUrl || !xApiKey) {
-  alert('Missing tunnel URL or API key');
-  return;
-}
-
-const res = await fetch(`${tunnelUrl}/upload`, {
-  method:'POST',
-  headers:{ 
-    'Content-Type':'application/json', 
-    'x-api-key': xApiKey
-  },
+      if (!tunnelUrl || !xApiKey) { alert('Missing tunnel URL or API key'); return; }
+      const res = await fetch(`${tunnelUrl}/upload`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'x-api-key': xApiKey },
         body: JSON.stringify({ tempo, treble, bass }),
       });
       if (!res.ok) { alert('❌ Upload failed: ' + res.status); return; }
@@ -760,53 +987,37 @@ const res = await fetch(`${tunnelUrl}/upload`, {
 
   const keySig = KEY_SIGNATURES[selKey] || { sharps:[], flats:[] };
 
-  // ── addNote: smart placement with auto-rest padding
-  // targetSlot is the absolute slot index the user clicked.
-  // We map that to beats by treating each existing note as occupying its own duration,
-  // then fill any gap with rests before appending the new note.
-const addNote = useCallback((clef, vi, nd) => {
-  const setter = clef === 'treble' ? setTreble : setBass;
-
-  setter(prev => {
-    const next = prev.map(v => [...v]);
-    const voice = next[vi];
-
-    const newNote = {
-      note: nd.note,
-      duration: nd.duration,
-      type: nd.type,
-      accidental: nd.accidental
-    };
-
-    let beatCursor = 0;
-    const newVoice = [];
-    let inserted = false;
-
-    for (let note of voice) {
-
-      // ✅ INSERT BEFORE existing note (NO RESTS)
-      if (!inserted && nd.targetBeat < beatCursor + note.duration) {
+  const addNote = useCallback((clef, vi, nd) => {
+    const setter = clef === 'treble' ? setTreble : setBass;
+    setter(prev => {
+      const next = prev.map(v => [...v]);
+      const voice = next[vi];
+      const newNote = { note: nd.note, duration: nd.duration, type: nd.type, accidental: nd.accidental };
+      let beatCursor = 0;
+      const newVoice = [];
+      let inserted = false;
+      for (let note of voice) {
+        if (!inserted && nd.targetBeat < beatCursor + note.duration - 0.0001) {
+          const gap = Math.round((nd.targetBeat - beatCursor) * 10000) / 10000;
+          if (gap >= nd.duration - 0.0001) {
+            newVoice.push(...makeRestFillWithDuration(gap, nd.duration));
+          }
+          newVoice.push(newNote);
+          inserted = true;
+        }
+        newVoice.push(note);
+        beatCursor += note.duration;
+      }
+      if (!inserted) {
+        if (nd.targetBeat > beatCursor + 0.0001) {
+          newVoice.push(...makeRestFill(nd.targetBeat - beatCursor));
+        }
         newVoice.push(newNote);
-        inserted = true;
       }
-
-      newVoice.push(note);
-      beatCursor += note.duration;
-    }
-
-    // ✅ If placing AFTER everything → allow rests
-    if (!inserted) {
-      if (nd.targetBeat > beatCursor) {
-        const gap = nd.targetBeat - beatCursor;
-        newVoice.push(...makeRestFill(gap));
-      }
-      newVoice.push(newNote);
-    }
-
-    next[vi] = newVoice;
-    return next;
-  });
-}, []);
+      next[vi] = newVoice;
+      return next;
+    });
+  }, []);
 
   const addRestManual = useCallback((clef, vi, dur) => {
     const setter = clef === 'treble' ? setTreble : setBass;
@@ -815,12 +1026,54 @@ const addNote = useCallback((clef, vi, nd) => {
       next[vi] = [...next[vi], { note:'Rest', duration:dur, type:'reg', accidental:'natural' }];
       return next;
     });
-    showToast(`+ Rest → ${clef} V${vi+1}`);
+    showToast(`+ Rest (${DURATIONS.find(d=>d.value===dur)?.label||dur}) → ${clef} V${vi+1}`);
   }, []);
 
-  const deleteLast = useCallback((clef, vi) => {
+  // Add a rest at a specific beat position (right-click behavior)
+  const addRestAtBeat = useCallback((clef, vi, dur, targetBeat) => {
     const setter = clef === 'treble' ? setTreble : setBass;
-    setter(prev => { const n=prev.map(v=>[...v]); if(n[vi].length) n[vi]=n[vi].slice(0,-1); return n; });
+    setter(prev => {
+      const next = prev.map(v => [...v]);
+      const voice = next[vi];
+      const restNote = { note:'Rest', duration:dur, type:'reg', accidental:'natural' };
+      let beatCursor = 0;
+      const newVoice = [];
+      let inserted = false;
+      for (let note of voice) {
+        if (!inserted && targetBeat < beatCursor + note.duration - 0.0001) {
+          const gap = Math.round((targetBeat - beatCursor) * 10000) / 10000;
+          if (gap >= dur - 0.0001) {
+            newVoice.push(...makeRestFillWithDuration(gap, dur));
+          }
+          newVoice.push(restNote);
+          inserted = true;
+        }
+        newVoice.push(note);
+        beatCursor += note.duration;
+      }
+      if (!inserted) {
+        if (targetBeat > beatCursor + 0.0001) {
+          newVoice.push(...makeRestFill(targetBeat - beatCursor));
+        }
+        newVoice.push(restNote);
+      }
+      next[vi] = newVoice;
+      return next;
+    });
+  }, []);
+
+  const deleteLast = useCallback((clef, vi, idx) => {
+    const setter = clef === 'treble' ? setTreble : setBass;
+    setter(prev => {
+      const n = prev.map(v => [...v]);
+      if (!n[vi].length) return n;
+      if (idx !== null && idx >= 0 && idx < n[vi].length) {
+        n[vi] = n[vi].filter((_, i) => i !== idx);
+      } else {
+        n[vi] = n[vi].slice(0, -1);
+      }
+      return n;
+    });
   }, []);
 
   const deleteExact = (clef, vi, ni) => {
@@ -871,7 +1124,7 @@ const addNote = useCallback((clef, vi, nd) => {
             Buzzer <span style={{ color:accent }}>Composer</span>
           </h1>
           <p style={{ ...M, fontSize:'0.75rem', color:textMuted, lineHeight:1.75, maxWidth:560 }}>
-            Click the staff to place notes · clicking ahead of the last note auto-fills rests · right-click = undo last · V2/V3 rests are shown as small indicators below the staff
+            Click the staff to place notes · right-click = delete hovered note · Space = play
           </p>
         </div>
 
@@ -908,7 +1161,7 @@ const addNote = useCallback((clef, vi, nd) => {
         </div>
 
         {/* NOTE PROPERTIES */}
-        <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'1rem 1.2rem', marginBottom:'1.5rem' }}>
+        <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'1rem 1.2rem', marginBottom:'1rem' }}>
           <SectionLabel>Note Properties</SectionLabel>
           <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap', alignItems:'center' }}>
             <div style={{ display:'flex', alignItems:'center', gap:7 }}>
@@ -925,43 +1178,117 @@ const addNote = useCallback((clef, vi, nd) => {
               <span style={{ ...M, fontSize:'0.6rem', color:textMuted }}>ART</span>
               <ToggleGroup options={ARTICULATIONS} value={selArt} onChange={setSelArt} />
             </div>
+            <div style={{ width:1, height:20, background:border }} />
+            <button onClick={() => setEraseMode(p => !p)}
+              style={{ ...M, fontSize:'0.62rem', padding:'0.22rem 0.7rem', borderRadius:3, cursor:'pointer',
+                border:`1px solid ${eraseMode ? '#c86e6e' : 'rgba(0,0,0,0.14)'}`,
+                background: eraseMode ? 'rgba(200,110,110,0.12)' : 'transparent',
+                color: eraseMode ? '#c86e6e' : '#888', transition:'all .15s', fontWeight: eraseMode ? 700 : 400 }}>
+              ✕ Erase {eraseMode ? 'ON' : 'OFF'}
+            </button>
           </div>
         </div>
 
-        {/* TREBLE */}
-        <div style={{ marginBottom:'2rem' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', marginBottom:'0.45rem', flexWrap:'wrap' }}>
-            <SectionLabel>Treble Clef</SectionLabel>
-            <VoicePicker voices={treble} active={activeTreble} setActive={setActiveTreble} colors={TREBLE_COLORS} />
-            <Btn small onClick={() => addRestManual('treble', activeTreble, selDur)}>+ Rest</Btn>
+        {/* KEYBOARD SHORTCUT LEGEND */}
+        <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'0.75rem 1.2rem', marginBottom:'1.5rem' }}>
+          <SectionLabel>Keyboard Shortcuts</SectionLabel>
+          <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap' }}>
+            {[
+              ['1–8', 'Duration (16th→whole)'],
+              ['r', 'Regular (key sig)'],
+              ['n', '♮ Natural'],
+              ['s', '♯ Sharp'],
+              ['f', '♭ Flat'],
+              ['q', 'Articulation: reg'],
+              ['w', 'Articulation: stac'],
+              ['e', 'Articulation: lega'],
+              ['t / b', 'Focus treble / bass'],
+              ['[ ] \\', 'Voice 1 / 2 / 3'],
+              ['x', '+ Rest (current dur)'],
+              ['d', 'Toggle erase mode'],
+              ['Del / ⌫', 'Delete last note'],
+              ['Space', 'Play'],
+            ].map(([k, desc]) => (
+              <div key={k} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ ...M, fontSize:'0.6rem', background:'#f5f4f0', border:`1px solid ${border}`, borderRadius:3, padding:'0.15rem 0.4rem', color:accent, fontWeight:700 }}>{k}</span>
+                <span style={{ ...M, fontSize:'0.58rem', color:textMuted }}>{desc}</span>
+              </div>
+            ))}
           </div>
-          <StaffCanvas
-            clef="treble" voicesNotes={treble} activeVoice={activeTreble}
-            selDur={selDur} selArt={selArt} selAcc={selAcc} keySig={keySig} timeSig={timeSig}
-            onAddNote={nd => addNote('treble', activeTreble, nd)}
-            onDeleteNote={() => deleteLast('treble', activeTreble)}
-          />
-          <p style={{ ...M, fontSize:'0.57rem', color:textMuted, marginTop:'0.3rem' }}>
-            stems up · V{activeTreble+1} active · right-click = undo last
-          </p>
         </div>
 
-        {/* BASS */}
+        {/* TREBLE — one canvas per voice */}
         <div style={{ marginBottom:'2rem' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', marginBottom:'0.45rem', flexWrap:'wrap' }}>
-            <SectionLabel>Bass Clef</SectionLabel>
-            <VoicePicker voices={bass} active={activeBass} setActive={setActiveBass} colors={BASS_COLORS} />
-            <Btn small onClick={() => addRestManual('bass', activeBass, selDur)}>+ Rest</Btn>
-          </div>
-          <StaffCanvas
-            clef="bass" voicesNotes={bass} activeVoice={activeBass}
-            selDur={selDur} selArt={selArt} selAcc={selAcc} keySig={keySig} timeSig={timeSig}
-            onAddNote={nd => addNote('bass', activeBass, nd)}
-            onDeleteNote={() => deleteLast('bass', activeBass)}
-          />
-          <p style={{ ...M, fontSize:'0.57rem', color:textMuted, marginTop:'0.3rem' }}>
-            stems down · V{activeBass+1} active · right-click = undo last
-          </p>
+          <SectionLabel>Treble Clef</SectionLabel>
+          {treble.map((voice, vi) => (
+            <div key={vi} style={{ marginBottom:'0.5rem' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', marginBottom:'0.25rem' }}>
+                <button onClick={() => { setActiveTreble(vi); setActiveClef('treble'); }}
+                  style={{ ...M, fontSize:'0.6rem', padding:'0.2rem 0.6rem', borderRadius:3,
+                    border:`1px solid ${vi===activeTreble && activeClef==='treble' ? TREBLE_COLORS[vi] : 'rgba(0,0,0,0.14)'}`,
+                    background: vi===activeTreble && activeClef==='treble' ? TREBLE_COLORS[vi]+'22' : 'transparent',
+                    color: vi===activeTreble && activeClef==='treble' ? TREBLE_COLORS[vi] : '#888',
+                    cursor:'pointer', transition:'all .15s' }}>
+                  V{vi+1} {voice.length ? `(${voice.length})` : '(empty)'}
+                </button>
+                <Btn small onClick={() => addRestManual('treble', vi, selDur)}>+ Rest</Btn>
+                <span style={{ ...M, fontSize:'0.55rem', color:textMuted }}>
+                  {vi===activeTreble && activeClef==='treble' ? '← active (click staff to add notes)' : 'click label to activate'}
+                </span>
+              </div>
+              <StaffCanvas
+                clef="treble"
+                voiceNotes={voice}
+                voiceColor={TREBLE_COLORS[vi]}
+                voiceIdx={vi}
+                isActive={vi===activeTreble && activeClef==='treble'}
+                eraseMode={eraseMode}
+                selDur={selDur} selArt={selArt} selAcc={selAcc} keySig={keySig} timeSig={timeSig}
+                onAddNote={nd => { setActiveClef('treble'); setActiveTreble(vi); addNote('treble', vi, nd); }}
+                onAddRest={beat => { setActiveClef('treble'); setActiveTreble(vi); addRestAtBeat('treble', vi, selDur, beat); }}
+                onDeleteNote={idx => deleteLast('treble', vi, idx)}
+                playingBar={playingBar}
+                totalBeatsRef={totalBeatsRef}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* BASS — one canvas per voice */}
+        <div style={{ marginBottom:'2rem' }}>
+          <SectionLabel>Bass Clef</SectionLabel>
+          {bass.map((voice, vi) => (
+            <div key={vi} style={{ marginBottom:'0.5rem' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', marginBottom:'0.25rem' }}>
+                <button onClick={() => { setActiveBass(vi); setActiveClef('bass'); }}
+                  style={{ ...M, fontSize:'0.6rem', padding:'0.2rem 0.6rem', borderRadius:3,
+                    border:`1px solid ${vi===activeBass && activeClef==='bass' ? BASS_COLORS[vi] : 'rgba(0,0,0,0.14)'}`,
+                    background: vi===activeBass && activeClef==='bass' ? BASS_COLORS[vi]+'22' : 'transparent',
+                    color: vi===activeBass && activeClef==='bass' ? BASS_COLORS[vi] : '#888',
+                    cursor:'pointer', transition:'all .15s' }}>
+                  V{vi+1} {voice.length ? `(${voice.length})` : '(empty)'}
+                </button>
+                <Btn small onClick={() => addRestManual('bass', vi, selDur)}>+ Rest</Btn>
+                <span style={{ ...M, fontSize:'0.55rem', color:textMuted }}>
+                  {vi===activeBass && activeClef==='bass' ? '← active (click staff to add notes)' : 'click label to activate'}
+                </span>
+              </div>
+              <StaffCanvas
+                clef="bass"
+                voiceNotes={voice}
+                voiceColor={BASS_COLORS[vi]}
+                voiceIdx={vi}
+                isActive={vi===activeBass && activeClef==='bass'}
+                eraseMode={eraseMode}
+                selDur={selDur} selArt={selArt} selAcc={selAcc} keySig={keySig} timeSig={timeSig}
+                onAddNote={nd => { setActiveClef('bass'); setActiveBass(vi); addNote('bass', vi, nd); }}
+                onAddRest={beat => { setActiveClef('bass'); setActiveBass(vi); addRestAtBeat('bass', vi, selDur, beat); }}
+                onDeleteNote={idx => deleteLast('bass', vi, idx)}
+                playingBar={playingBar}
+                totalBeatsRef={totalBeatsRef}
+              />
+            </div>
+          ))}
         </div>
 
         {/* NOTE LISTS */}
@@ -983,42 +1310,12 @@ const addNote = useCallback((clef, vi, nd) => {
         {/* EXPORT */}
         <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'1.2rem', marginBottom:'2rem' }}>
           <SectionLabel>Export & Deploy</SectionLabel>
-          <div style={{ 
-  display: 'flex', 
-  flexDirection: 'column', 
-  gap: '0.4rem', 
-  marginBottom: '0.8rem' 
-}}>
-
-  <input
-    placeholder="Cloudflare Tunnel URL (https://...)"
-    value={tunnelUrl}
-    onChange={e => setTunnelUrl(e.target.value)}
-    style={{
-      ...M,
-      fontSize:'0.65rem',
-      padding:'0.35rem 0.5rem',
-      borderRadius:4,
-      border:`1px solid ${border}`,
-      background:'#f5f4f0'
-    }}
-  />
-
-  <input
-    placeholder="X-API Key"
-    value={xApiKey}
-    onChange={e => setXApiKey(e.target.value)}
-    style={{
-      ...M,
-      fontSize:'0.65rem',
-      padding:'0.35rem 0.5rem',
-      borderRadius:4,
-      border:`1px solid ${border}`,
-      background:'#f5f4f0'
-    }}
-  />
-
-</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem', marginBottom:'0.8rem' }}>
+            <input placeholder="Cloudflare Tunnel URL (https://...)" value={tunnelUrl} onChange={e=>setTunnelUrl(e.target.value)}
+              style={{ ...M, fontSize:'0.65rem', padding:'0.35rem 0.5rem', borderRadius:4, border:`1px solid ${border}`, background:'#f5f4f0' }} />
+            <input placeholder="X-API Key" value={xApiKey} onChange={e=>setXApiKey(e.target.value)}
+              style={{ ...M, fontSize:'0.65rem', padding:'0.35rem 0.5rem', borderRadius:4, border:`1px solid ${border}`, background:'#f5f4f0' }} />
+          </div>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             <Btn onClick={handleUpload}>📡 Upload to ESP</Btn>
             <Btn success onClick={downloadHeader}><Download size={11}/> Download .h</Btn>
