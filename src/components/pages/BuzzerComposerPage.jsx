@@ -866,7 +866,7 @@ function StaffCanvas({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
-        style={{ cursor: isActive ? (eraseMode ? 'cell' : 'crosshair') : 'default', display: 'block' }}
+        style={{ cursor: isActive ? (eraseMode ? 'cell' : 'none') : 'default', display: 'block' }}
       />
     </div>
   );
@@ -1099,7 +1099,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
         // Space = play
         case ' ':
           e.preventDefault();
-          handlePlay();
+          handlePlayRef.current?.();
           break;
 
         default: break;
@@ -1110,11 +1110,12 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selDur, selAcc, selArt, activeClef, activeTreble, activeBass, eraseMode]);
 
-  // Scroll wheel cycles through durations
+  // Scroll wheel + Shift cycles through durations; plain scroll = normal page scroll
   useEffect(() => {
     const durValues = DURATIONS.map(d => d.value);
     const wheelHandler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      if (!e.shiftKey) return; // let normal scroll through
       e.preventDefault();
       setSelDur(prev => {
         const idx = durValues.indexOf(prev);
@@ -1206,6 +1207,8 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     }
   }
 
+  const handlePlayRef = useRef(null);
+
   const handlePlay = async () => {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -1224,6 +1227,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
     await Promise.all(allVoices.map(v => playVoice(v, audioCtx, keySig)));
   };
+  handlePlayRef.current = handlePlay;
 
   const handleUpload = async () => {
     try {
@@ -1448,7 +1452,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
           <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap' }}>
             {[
               ['1–8', 'Duration (16th→whole)'],
-              ['scroll', 'Duration ↕'],
+              ['Shift+scroll', 'Duration ↕'],
               ['r/n/s/f', 'Accidental'],
               ['q/w/e', 'Articulation'],
               ['t / b', 'Focus treble / bass'],
@@ -1580,6 +1584,27 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
               {generated}
             </pre>
           )}
+        </div>
+
+        {/* SETUP GUIDE */}
+        <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'1.2rem', marginBottom:'2rem' }}>
+          <SectionLabel>ESP32 + Cloudflare Tunnel Setup</SectionLabel>
+          <div style={{ display:'flex', flexDirection:'column', gap:'0.6rem' }}>
+            {[
+              ['1', 'Get the ESP32 code', <>Flash your ESP32 with the code from <a href="https://github.com/Jeff-h-kim/dancing-motor" target="_blank" rel="noreferrer" style={{ color:'#c8804e', textDecoration:'none' }}>github.com/Jeff-h-kim/dancing-motor</a>. Set your Wi-Fi credentials and an <code style={{ background:'#f5f4f0', padding:'0 3px', borderRadius:2 }}>X-API-Key</code> secret in the sketch before flashing.</>],
+              ['2', 'Install cloudflared', <>Download the <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noreferrer" style={{ color:'#c8804e', textDecoration:'none' }}>cloudflared</a> CLI for your OS (no account needed for a quick tunnel).</>],
+              ['3', 'Start a quick tunnel', <>With the ESP32 on your local network, run: <code style={{ background:'#f5f4f0', padding:'1px 5px', borderRadius:2 }}>cloudflared tunnel --url http://&lt;ESP32-IP&gt;:80</code>. Cloudflared prints a public <code style={{ background:'#f5f4f0', padding:'0 3px', borderRadius:2 }}>https://…trycloudflare.com</code> URL.</>],
+              ['4', 'Paste into the fields above', <>Copy that URL into <strong>Cloudflare Tunnel URL</strong> and your chosen secret into <strong>X-API Key</strong>, then hit <strong>📡 Upload to ESP</strong>.</>],
+            ].map(([num, title, desc]) => (
+              <div key={num} style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
+                <span style={{ ...M, fontSize:'0.6rem', color:'#fff', background:'#c8804e', borderRadius:'50%', width:16, height:16, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginTop:1, fontWeight:700 }}>{num}</span>
+                <div>
+                  <span style={{ ...M, fontSize:'0.65rem', color:textMain, fontWeight:700 }}>{title} — </span>
+                  <span style={{ ...M, fontSize:'0.63rem', color:textMuted, lineHeight:1.6 }}>{desc}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
       </div>
