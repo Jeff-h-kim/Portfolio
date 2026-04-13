@@ -1270,8 +1270,8 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
       setSelDur(prev => {
         const idx = durValues.indexOf(prev);
         const next = e.deltaY > 0
-          ? durValues[Math.min(idx + 1, durValues.length - 1)]
-          : durValues[Math.max(idx - 1, 0)];
+          ? durValues[Math.max(idx - 1, 0)]
+          : durValues[Math.min(idx + 1, durValues.length - 1)];
         showToast(DURATIONS.find(d => d.value === next)?.label ?? '');
         return next;
       });
@@ -1351,7 +1351,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
   function playVoice(voice, audioCtx, keySig, rollStaggerSec = 0) {
     const beatMs  = 60000 / tempo;
-    const GRACE_S = 0.095; // matches ESP32 GRACE_MS = 85
+    const GRACE_S = 0.085; // matches ESP32 GRACE_MS = 85
     let t = audioCtx.currentTime + rollStaggerSec;
     let graceDebt = 0; // seconds already consumed by preceding grace note
     let inSlur = false;
