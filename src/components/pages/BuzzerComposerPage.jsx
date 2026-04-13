@@ -143,7 +143,13 @@ const DURATIONS = [
   {value:2.0,label:'half'},{value:3.0,label:'hlf·'},{value:4.0,label:'whole'},
 ];
 const ARTICULATIONS = [
-  {value:'reg',label:'reg'},{value:'stac',label:'stac'},{value:'lega',label:'lega'},
+  {value:'reg',      label:'reg'},
+  {value:'stac',     label:'stac'},
+  {value:'legato',   label:'legato'},
+  {value:'grace',    label:'grace'},
+  {value:'roll',     label:'roll'},
+  {value:'slur_start',label:'slur▶'},
+  {value:'slur_end', label:'◀slur'},
 ];
 const ACCIDENTALS = [
   { value:'regular', label:'reg' },   // 👈 NEW
@@ -290,10 +296,29 @@ function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
     ctx.fillStyle = color;
     const dotY = stemUp ? cy+9 : cy-9;   // was ±13
     ctx.beginPath(); ctx.arc(cx, dotY, 1.6, 0, Math.PI*2); ctx.fill();   // was 2.2
-  } else if (articulation === 'lega') {
+  } else if (articulation === 'legato' || articulation === 'lega') {
     ctx.strokeStyle = color; ctx.lineWidth = 1.2;
     const lineY = stemUp ? cy+9 : cy-9;
     ctx.beginPath(); ctx.moveTo(cx-5, lineY); ctx.lineTo(cx+5, lineY); ctx.stroke();  // was ±7
+  } else if (articulation === 'grace') {
+    // Small 'g' marker above note
+    ctx.fillStyle = color;
+    ctx.font = '5px "Roboto Mono",monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('gr', cx, stemUp ? cy-30 : cy+30);
+  } else if (articulation === 'roll') {
+    // Wavy ~ marker
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    const ry = stemUp ? cy-30 : cy+30;
+    ctx.beginPath(); ctx.moveTo(cx-5, ry);
+    ctx.bezierCurveTo(cx-2, ry-3, cx+2, ry+3, cx+5, ry);
+    ctx.stroke();
+  } else if (articulation === 'slur_start') {
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, stemUp ? cy-30 : cy+30); ctx.lineTo(cx+6, stemUp ? cy-27 : cy+27); ctx.stroke();
+  } else if (articulation === 'slur_end') {
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx-6, stemUp ? cy-27 : cy+27); ctx.lineTo(cx, stemUp ? cy-30 : cy+30); ctx.stroke();
   }
   ctx.restore();
 }
@@ -345,6 +370,7 @@ function StaffCanvas({
   voiceIdx,
   isActive,
   eraseMode,       // boolean — left-click deletes instead of placing
+  slurMode,        // boolean — left-click cycles slur type on existing note
   selDur,
   selArt,
   selAcc,
@@ -353,6 +379,8 @@ function StaffCanvas({
   onAddNote,
   onAddRest,       // (beat) => void — right-click adds rest at beat
   onDeleteNote,
+  onSlurNote,      // (idx) => void — cycles slur state on existing note
+  onEditNote,      // (idx, patch) => void — mutate properties of existing note
   playingBar,
   totalBeatsRef,   // shared ref so bar lines align across voices
 }) {
@@ -589,9 +617,9 @@ function StaffCanvas({
         if (x === undefined) continue;
 
         const isHovered = ln.idx === hoveredNoteIdx;
-        // In erase mode hovered note = red; normal hovered note = orange highlight
+        // In erase mode hovered note = red; slur mode = blue; normal = orange
         const noteColor = isHovered
-          ? (eraseMode ? '#e55' : '#e8924e')
+          ? (eraseMode ? '#e55' : slurMode ? '#6eaac8' : '#e8924e')
           : voiceColor;
 
         if (ln.note.note === 'Rest') {
@@ -624,7 +652,7 @@ function StaffCanvas({
               ctx.beginPath(); ctx.moveTo(x-9, y-9); ctx.lineTo(x+9, y+9); ctx.stroke();
               ctx.beginPath(); ctx.moveTo(x+9, y-9); ctx.lineTo(x-9, y+9); ctx.stroke();
             } else {
-              ctx.strokeStyle = 'rgba(232,146,78,0.55)';
+              ctx.strokeStyle = slurMode ? 'rgba(110,170,200,0.7)' : 'rgba(232,146,78,0.55)';
               ctx.lineWidth = 1.5;
               ctx.beginPath();
               ctx.ellipse(x, y, 10, 8, 0, 0, Math.PI * 2);
@@ -643,11 +671,97 @@ function StaffCanvas({
             ctx.fillText(sym, x - 14, y);
             ctx.restore();
           }
+          // slur indicator dots
+          if (ln.note.type === 'slur_start' || ln.note.type === 'slur_end') {
+            ctx.save();
+            ctx.fillStyle = '#6eaac8';
+            ctx.globalAlpha = 0.9;
+            const dotY = isT ? y + 22 : y - 22;
+            ctx.beginPath(); ctx.arc(x, dotY, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.font = '5.5px "Roboto Mono",monospace';
+            ctx.fillStyle = '#6eaac8';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(ln.note.type === 'slur_start' ? '▶' : '◀', x, dotY + 8);
+            ctx.restore();
+          }
         }
       }
-    }
+      // ─── SLUR ARCS ─────────────────────────────────────────────────────
+      // Find all slur_start → slur_end spans on this line and draw a curved arc
+      {
+        // Build a map of all note positions across the whole voice (with beat tracking)
+        let slurBeatCursor = 0;
+        const allNoteBeats = voiceNotes.map(n => { const b = slurBeatCursor; slurBeatCursor += n.duration; return b; });
 
-    // ─── GHOST NOTE / GHOST RESTS (hover preview) ────────
+        // Find slur groups
+        let i = 0;
+        while (i < voiceNotes.length) {
+          if (voiceNotes[i].type === 'slur_start') {
+            const startIdx = i;
+            let endIdx = -1;
+            for (let j = i + 1; j < voiceNotes.length; j++) {
+              if (voiceNotes[j].type === 'slur_end') { endIdx = j; break; }
+            }
+            if (endIdx === -1) { i++; continue; }
+
+            // Check if either endpoint is on this line
+            const startBeat = allNoteBeats[startIdx];
+            const endBeat   = allNoteBeats[endIdx];
+            const lineEnd   = lineStartBeat + actualBeatsPerLine;
+
+            // Only draw if the slur overlaps this line
+            if (endBeat >= lineStartBeat - 0.0001 && startBeat < lineEnd + 0.0001) {
+              const clampedStartBeat = Math.max(startBeat, lineStartBeat);
+              const clampedEndBeat   = Math.min(endBeat,   lineEnd - 0.0001);
+
+              // Get x coords
+              const sx = noteXMap.get(startIdx) ?? beatToCanvasX(clampedStartBeat);
+              const ex = noteXMap.get(endIdx)   ?? beatToCanvasX(clampedEndBeat);
+
+              // Get y coords — average row of slurred notes for arc placement
+              let sumY = 0, cnt = 0;
+              for (let k = startIdx; k <= endIdx; k++) {
+                const rowObj = rows.find(r => r.note === voiceNotes[k].note);
+                if (rowObj) { sumY += getYFromRow(rowObj.row, staffTop); cnt++; }
+              }
+              const avgY = cnt > 0 ? sumY / cnt : midY;
+              // Arc goes below notes for treble (stems up), above for bass
+              const arcDir = isT ? 1 : -1;
+              const arcY = avgY + arcDir * 18;
+              const cp1x = sx + (ex - sx) * 0.25;
+              const cp2x = sx + (ex - sx) * 0.75;
+              const cpY  = avgY + arcDir * 32;
+
+              ctx.save();
+              ctx.strokeStyle = voiceColor;
+              ctx.lineWidth = 2;
+              ctx.globalAlpha = 0.55;
+              ctx.setLineDash([]);
+              ctx.beginPath();
+              ctx.moveTo(sx, avgY + arcDir * 6);
+              ctx.bezierCurveTo(cp1x, cpY, cp2x, cpY, ex, avgY + arcDir * 6);
+              ctx.stroke();
+
+              // Shade the interior of the slur span
+              ctx.globalAlpha = 0.06;
+              ctx.fillStyle = voiceColor;
+              ctx.beginPath();
+              ctx.moveTo(sx, avgY + arcDir * 6);
+              ctx.bezierCurveTo(cp1x, cpY, cp2x, cpY, ex, avgY + arcDir * 6);
+              ctx.lineTo(ex, avgY + arcDir * 4);
+              ctx.bezierCurveTo(cp2x, cpY - arcDir * 4, cp1x, cpY - arcDir * 4, sx, avgY + arcDir * 4);
+              ctx.closePath();
+              ctx.fill();
+              ctx.restore();
+            }
+            i = endIdx + 1;
+          } else {
+            i++;
+          }
+        }
+      }
+    } // end for (let li...)
+
     if (hoverBeat && isActive) {
       const li = hoverBeat.li ?? Math.floor(hoverBeat.beat / actualBeatsPerLine);
       if (li < actualNumLines) {
@@ -744,7 +858,7 @@ function StaffCanvas({
       }
     }
 
-  }, [voiceNotes, hoverBeat, hoveredNoteIdx, selDur, selArt, selAcc, isActive, eraseMode, playingBar]);
+  }, [voiceNotes, hoverBeat, hoveredNoteIdx, selDur, selArt, selAcc, isActive, eraseMode, slurMode, playingBar]);
 
   // ─── MOUSE ─────────────────────────────────────────────
   const getCoords = useCallback((e) => {
@@ -835,9 +949,25 @@ function StaffCanvas({
     if (!isActive) return;
     const c = getCoords(e);
     if (eraseMode) {
-      // left-click in erase mode = delete hovered note
       onDeleteNote(c.hoveredNoteIdx !== null ? c.hoveredNoteIdx : null);
       return;
+    }
+    if (slurMode) {
+      if (c.hoveredNoteIdx !== null) onSlurNote(c.hoveredNoteIdx);
+      return;
+    }
+    // If clicking an existing note, patch its properties instead of inserting a new note
+    if (c.hoveredNoteIdx !== null) {
+      const patch = {};
+      // Apply selected accidental if it differs from 'regular' (i.e. user explicitly picked one)
+      if (selAcc !== 'regular') patch.accidental = selAcc;
+      // Apply selected articulation if it's not the default 'reg'
+      if (selArt !== 'reg') patch.type = selArt;
+      if (Object.keys(patch).length > 0) {
+        onEditNote(c.hoveredNoteIdx, patch);
+        return;
+      }
+      // If both are defaults, fall through to normal note placement
     }
     const rowObj = rows.find(r => r.row === c.row);
     if (!rowObj) return;
@@ -848,7 +978,7 @@ function StaffCanvas({
       accidental: selAcc,
       targetBeat: c.beat
     });
-  }, [isActive, eraseMode, getCoords, rows, selDur, selArt, selAcc, onAddNote, onDeleteNote]);
+  }, [isActive, eraseMode, slurMode, getCoords, rows, selDur, selArt, selAcc, onAddNote, onDeleteNote, onSlurNote, onEditNote]);
 
   const handleContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -866,7 +996,7 @@ function StaffCanvas({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
-        style={{ cursor: isActive ? (eraseMode ? 'cell' : 'none') : 'default', display: 'block' }}
+        style={{ cursor: isActive ? (eraseMode ? 'cell' : slurMode ? 'crosshair' : 'none') : 'default', display: 'block' }}
       />
     </div>
   );
@@ -921,22 +1051,24 @@ else if (n.accidental === 'natural') acc = '♮';
 
 // ─── HEADER GENERATOR ─────────────────────────────────────────────────────────
 function generateHeader(title, tempo, treble, bass) {
-  const NAMES = { treble:['MELODY_JSON','MELODY2_JSON','MELODY3_JSON'], bass:['BASS_JSON','BASS2_JSON','BASS3_JSON'] };
+  const NAMES = { treble:['MELODY1_JSON','MELODY2_JSON','MELODY3_JSON'], bass:['BASS1_JSON','BASS2_JSON','BASS3_JSON'] };
   const fmtNote = n => {
     if (n.note === 'Rest') return 'Rest';
     const acc = n.accidental === 'sharp' ? '#' : n.accidental === 'flat' ? 'b' : '';
     return n.note[0] + acc + n.note.slice(1);
   };
+  // Normalize type: lega→legato for ESP32 compatibility
+  const fmtType = t => t === 'lega' ? 'legato' : t;
   const out = ['#pragma once', `// Generated by Buzzer Composer — ${new Date().toISOString()}`, `// Song: ${title}  |  Tempo: ${tempo} BPM`, ''];
   [['treble',treble],['bass',bass]].forEach(([clef,vs]) => {
     vs.forEach((arr,vi) => {
       if (!arr.length) return;
-      const obj = { title:`${title} - ${clef[0].toUpperCase()+clef.slice(1)} V${vi+1}`, tempo, notes:arr.map(n=>({note:fmtNote(n),duration:n.duration,type:n.type})) };
+      const obj = { title:`${title} - ${clef[0].toUpperCase()+clef.slice(1)} V${vi+1}`, tempo, notes:arr.map(n=>({note:fmtNote(n),duration:n.duration,type:fmtType(n.type)})) };
       out.push(`const char *${NAMES[clef][vi]} = R"(${JSON.stringify(obj,null,4)})";`);
       out.push('');
     });
   });
-  out.push('// loadSong(MELODY_JSON, melodyDoc); loadSong(BASS_JSON, bassDoc);');
+  out.push('// Usage: deserializeJson(docs[0], MELODY1_JSON); ... up to MELODY3_JSON, BASS1_JSON–BASS3_JSON');
   return out.join('\n');
 }
 
@@ -1000,6 +1132,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   const [toast, setToast] = useState(null);
   const [playingBar, setPlayingBar] = useState(null);
   const [eraseMode, setEraseMode] = useState(false);
+  const [slurMode, setSlurMode] = useState(false);
 
   const [xApiKey, setXApiKey] = useState('');
   const [tunnelUrl, setTunnelUrl] = useState('');
@@ -1054,9 +1187,11 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
         case 'r': setSelAcc('regular'); showToast('Regular (key sig)'); break;
 
         // Articulations: q=regular, w=staccato, e=legato
-        case 'q': setSelArt('reg');  showToast('Articulation: Regular'); break;
-        case 'w': setSelArt('stac'); showToast('Articulation: Staccato'); break;
-        case 'e': setSelArt('lega'); showToast('Articulation: Legato'); break;
+        case 'q': setSelArt('reg');       showToast('Articulation: Regular'); break;
+        case 'w': setSelArt('stac');      showToast('Articulation: Staccato'); break;
+        case 'e': setSelArt('legato');    showToast('Articulation: Legato'); break;
+        case 'g': setSelArt('grace');     showToast('Articulation: Grace'); break;
+        case 'o': setSelArt('roll');      showToast('Articulation: Roll'); break;
 
         // Active clef: t=treble, b=bass
         case 't': setActiveClef('treble'); showToast('Treble clef active'); break;
@@ -1084,7 +1219,22 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
         // Erase mode toggle: `d`
         case 'd':
-          setEraseMode(p => { showToast(p ? 'Erase off' : '✕ Erase mode on'); return !p; });
+          setEraseMode(p => {
+            const next = !p;
+            if (next) setSlurMode(false);
+            showToast(next ? '✕ Erase mode on' : 'Erase off');
+            return next;
+          });
+          break;
+
+        // Slur mode toggle: `z`
+        case 'z':
+          setSlurMode(p => {
+            const next = !p;
+            if (next) setEraseMode(false);
+            showToast(next ? '⌒ Slur mode on — click notes' : 'Slur mode off');
+            return next;
+          });
           break;
 
         // Delete hovered note: Delete or Backspace = delete last in active voice
@@ -1108,7 +1258,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selDur, selAcc, selArt, activeClef, activeTreble, activeBass, eraseMode]);
+  }, [selDur, selAcc, selArt, activeClef, activeTreble, activeBass, eraseMode, slurMode]);
 
   // Scroll wheel + Shift cycles through durations; plain scroll = normal page scroll
   useEffect(() => {
@@ -1184,26 +1334,63 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     e.target.value = ''; // reset so same file can be re-imported
   };
 
-  async function playVoice(voice, audioCtx, keySig) {
-    const beatMs = 60000 / tempo;
-    let t = audioCtx.currentTime;
-    for (const note of voice) {
-      const dur = (note.duration * beatMs) / 1000;
-      if (note.note !== 'Rest') {
+  function scheduleNote(audioCtx, freq, startT, playDur, totalDur, waveform = 'square', gainPeak = 0.45) {
+    if (!freq || playDur <= 0) return;
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = waveform;
+    osc.frequency.setValueAtTime(freq, startT);
+    gain.gain.setValueAtTime(0.001, startT);
+    gain.gain.exponentialRampToValueAtTime(gainPeak, startT + Math.min(0.012, playDur * 0.1));
+    gain.gain.exponentialRampToValueAtTime(0.001, startT + playDur - 0.005);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(startT);
+    osc.stop(startT + playDur);
+  }
+
+  function playVoice(voice, audioCtx, keySig, rollStaggerSec = 0) {
+    const beatMs  = 60000 / tempo;
+    const GRACE_S = 0.095; // matches ESP32 GRACE_MS = 85
+    let t = audioCtx.currentTime + rollStaggerSec;
+    let graceDebt = 0; // seconds already consumed by preceding grace note
+    let inSlur = false;
+
+    for (let i = 0; i < voice.length; i++) {
+      const note   = voice[i];
+      const type   = note.type || 'reg';
+      const totalS = Math.max((note.duration * beatMs) / 1000 - graceDebt, 0.01);
+      graceDebt = 0;
+
+      if (type === 'grace') {
+        // Grace: play for GRACE_S, steal that time from next note
         const freq = getFrequency(note, keySig);
-        if (freq) {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = 'square';
-          osc.frequency.setValueAtTime(freq, t);
-          gain.gain.setValueAtTime(0.001, t);
-          gain.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-          osc.connect(gain); gain.connect(audioCtx.destination);
-          osc.start(t); osc.stop(t + dur);
-        }
+        if (freq && note.note !== 'Rest') scheduleNote(audioCtx, freq, t, GRACE_S * 0.9, GRACE_S, 'square', 0.3);
+        t += GRACE_S;
+        graceDebt = GRACE_S;
+        continue;
       }
-      t += dur;
+
+      // Slur tracking
+      if (type === 'slur_start') inSlur = true;
+
+      const freq = getFrequency(note, keySig);
+
+      // Compute playDur based on articulation
+      let playDur;
+      if (type === 'stac')                   playDur = totalS * 0.5;
+      else if (type === 'legato')            playDur = totalS;
+      else if (inSlur)                       playDur = totalS; // no gap inside slur
+      else if (type === 'roll')              playDur = totalS * 0.92;
+      else                                   playDur = totalS * 0.8; // reg
+
+      if (type === 'slur_end') inSlur = false;
+
+      if (note.note !== 'Rest' && freq) {
+        scheduleNote(audioCtx, freq, t, playDur, totalS);
+      }
+
+      t += totalS;
     }
   }
 
@@ -1211,9 +1398,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
   const handlePlay = async () => {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-
-    const beatMs = 60000 / tempo;
+    if (audioCtx.state === 'suspended') await audioCtx.resume();    const beatMs = 60000 / tempo;
     const beatsPerBar = timeSig === '3/4' ? 3 : 4;
     const allVoices = [...treble, ...bass];
     const totalBeats = Math.max(...allVoices.map(v => v.reduce((s,n)=>s+n.duration,0)), beatsPerBar);
@@ -1225,17 +1410,37 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     }
     setTimeout(() => setPlayingBar(null), totalBars * beatsPerBar * beatMs);
 
-    await Promise.all(allVoices.map(v => playVoice(v, audioCtx, keySig)));
+    // Roll stagger: ESP32 plays bass→treble with 25ms between each channel.
+    // Voices order: [treble0, treble1, treble2, bass0, bass1, bass2]
+    // Roll order bass→treble: bass2, bass1, bass0, treble2, treble1, treble0
+    const ROLL_STEP_S = 0.025;
+    const rollOrder = [5, 4, 3, 2, 1, 0]; // indices into allVoices
+    allVoices.forEach((v, vi) => {
+      const rollPos = rollOrder.indexOf(vi);
+      const stagger = rollPos >= 0 ? rollPos * ROLL_STEP_S : 0;
+      playVoice(v, audioCtx, keySig, stagger);
+    });
   };
   handlePlayRef.current = handlePlay;
 
   const handleUpload = async () => {
     try {
       if (!tunnelUrl || !xApiKey) { alert('Missing tunnel URL or API key'); return; }
+
+      // Normalize note data for ESP32 consumption:
+      //   - accidental "regular" → "" (ESP32 convertChannel checks for "sharp"/"flat" only)
+      //   - type "lega" → "legato" (legacy value guard)
+      const normalizeVoice = voice => voice.map(n => ({
+        ...n,
+        accidental: n.accidental === 'regular' ? '' : n.accidental,
+        type: n.type === 'lega' ? 'legato' : n.type,
+      }));
+      const normalizeClef = voices => voices.map(normalizeVoice);
+
       const res = await fetch(`${tunnelUrl}/upload`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'x-api-key': xApiKey },
-        body: JSON.stringify({ tempo, treble, bass }),
+        body: JSON.stringify({ tempo, treble: normalizeClef(treble), bass: normalizeClef(bass) }),
       });
       if (!res.ok) { alert('❌ Upload failed: ' + res.status); return; }
       alert('✅ Sent to ESP32!');
@@ -1338,6 +1543,37 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     setter(prev => { const n=prev.map(v=>[...v]); n[vi]=n[vi].filter((_,i)=>i!==ni); return n; });
   };
 
+  // Cycle a note's slur state when in slur mode:
+  //   reg/stac/legato → slur_start → (middle notes stay as-is, auto-detected) → slur_end → reg
+  // More specifically: clicking in slur mode toggles slur_start/slur_end on individual notes.
+  // The canvas draws an arc from the nearest slur_start to matching slur_end automatically.
+  const slurNote = useCallback((clef, vi, idx) => {
+    const setter = clef === 'treble' ? setTreble : setBass;
+    setter(prev => {
+      const next = prev.map(v => [...v]);
+      const note = { ...next[vi][idx] };
+      // Cycle: reg → slur_start → slur_end → reg
+      if (note.type === 'slur_start') note.type = 'slur_end';
+      else if (note.type === 'slur_end') note.type = 'reg';
+      else note.type = 'slur_start';
+      next[vi][idx] = note;
+      showToast(`Note ${idx+1}: ${note.type}`);
+      return next;
+    });
+  }, []);
+
+  // Patch specific properties of an existing note in-place
+  const editNote = useCallback((clef, vi, idx, patch) => {
+    const setter = clef === 'treble' ? setTreble : setBass;
+    setter(prev => {
+      const next = prev.map(v => [...v]);
+      next[vi][idx] = { ...next[vi][idx], ...patch };
+      const parts = Object.entries(patch).map(([k,v]) => `${k}: ${v}`).join(', ');
+      showToast(`Note ${idx+1} → ${parts}`);
+      return next;
+    });
+  }, []);
+
   const clearAll = () => {
     if (!confirm('Clear all notes?')) return;
     setTreble([[], [], []]); setBass([[], [], []]);
@@ -1419,10 +1655,10 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
         {/* NOTE PROPERTIES */}
         <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:8, padding:'1rem 1.2rem', marginBottom:'1rem' }}>
-          <SectionLabel>Note Properties <span style={{ color:textMuted, fontWeight:400, fontSize:'0.5rem', letterSpacing:'0.05em', textTransform:'none' }}>(scroll to change duration)</span></SectionLabel>
-          <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap', alignItems:'center' }}>
+          <SectionLabel>Note Properties <span style={{ color:textMuted, fontWeight:400, fontSize:'0.5rem', letterSpacing:'0.05em', textTransform:'none' }}>(Shift+scroll to change duration)</span></SectionLabel>
+          <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', alignItems:'center' }}>
             <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-              <span style={{ ...M, fontSize:'0.6rem', color:textMuted }}>DURATION</span>
+              <span style={{ ...M, fontSize:'0.6rem', color:textMuted }}>DUR</span>
               <ToggleGroup options={DURATIONS} value={selDur} onChange={v=>setSelDur(Number(v))} />
             </div>
             <div style={{ width:1, height:20, background:border }} />
@@ -1435,14 +1671,34 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
               <span style={{ ...M, fontSize:'0.6rem', color:textMuted }}>ART</span>
               <ToggleGroup options={ARTICULATIONS} value={selArt} onChange={setSelArt} />
             </div>
-            <div style={{ width:1, height:20, background:border }} />
-            <button onClick={() => setEraseMode(p => !p)}
-              style={{ ...M, fontSize:'0.62rem', padding:'0.22rem 0.7rem', borderRadius:3, cursor:'pointer',
-                border:`1px solid ${eraseMode ? '#c86e6e' : 'rgba(0,0,0,0.14)'}`,
-                background: eraseMode ? 'rgba(200,110,110,0.12)' : 'transparent',
-                color: eraseMode ? '#c86e6e' : '#888', transition:'all .15s', fontWeight: eraseMode ? 700 : 400 }}>
-              ✕ Erase {eraseMode ? 'ON' : 'OFF'}
+          </div>
+
+          {/* Mode buttons row */}
+          <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.75rem', flexWrap:'wrap', alignItems:'center' }}>
+            <span style={{ ...M, fontSize:'0.6rem', color:textMuted }}>MODES</span>
+            {/* Erase toggle */}
+            <button onClick={() => { setEraseMode(p => !p); if (slurMode) setSlurMode(false); }}
+              style={{ ...M, fontSize:'0.65rem', padding:'0.28rem 0.8rem', borderRadius:4, cursor:'pointer',
+                border:`1px solid ${eraseMode ? '#c86e6e' : 'rgba(0,0,0,0.15)'}`,
+                background: eraseMode ? 'rgba(200,110,110,0.13)' : 'transparent',
+                color: eraseMode ? '#c86e6e' : '#888', transition:'all .15s', fontWeight: eraseMode ? 700 : 400,
+                display:'flex', alignItems:'center', gap:5 }}>
+              <span style={{ fontSize:'0.8rem' }}>✕</span> Erase {eraseMode ? 'ON' : 'OFF'}
             </button>
+            {/* Slur toggle */}
+            <button onClick={() => { setSlurMode(p => !p); if (eraseMode) setEraseMode(false); }}
+              style={{ ...M, fontSize:'0.65rem', padding:'0.28rem 0.8rem', borderRadius:4, cursor:'pointer',
+                border:`1px solid ${slurMode ? '#6eaac8' : 'rgba(0,0,0,0.15)'}`,
+                background: slurMode ? 'rgba(110,170,200,0.13)' : 'transparent',
+                color: slurMode ? '#6eaac8' : '#888', transition:'all .15s', fontWeight: slurMode ? 700 : 400,
+                display:'flex', alignItems:'center', gap:5 }}>
+              <span style={{ fontSize:'1rem', lineHeight:1 }}>⌒</span> Slur {slurMode ? 'ON — click notes to set slur_start / slur_end' : 'OFF'}
+            </button>
+            {slurMode && (
+              <span style={{ ...M, fontSize:'0.58rem', color:'#6eaac8', fontStyle:'italic' }}>
+                click a note once → slur_start · again → slur_end · again → clear
+              </span>
+            )}
           </div>
         </div>
 
@@ -1451,14 +1707,16 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
           <SectionLabel>Keyboard Shortcuts</SectionLabel>
           <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap' }}>
             {[
-              ['1–8', 'Duration (16th→whole)'],
+              ['1–8', 'Duration (16th → whole)'],
               ['Shift+scroll', 'Duration ↕'],
-              ['r/n/s/f', 'Accidental'],
-              ['q/w/e', 'Articulation'],
+              ['r/n/s/f', 'Accidental (reg/nat/sharp/flat)'],
+              ['q/w/e', 'Art: reg / stac / legato'],
+              ['g / o', 'Art: grace / roll'],
               ['t / b', 'Focus treble / bass'],
               ['[ ] \\', 'Voice 1 / 2 / 3'],
-              ['x', '+ Rest (current dur)'],
+              ['x', '+ Rest'],
               ['d', 'Toggle erase mode'],
+              ['z', 'Toggle slur mode'],
               ['Del / ⌫', 'Delete last note'],
               ['Space', 'Play'],
             ].map(([k, desc]) => (
@@ -1496,10 +1754,13 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
                 voiceIdx={vi}
                 isActive={vi===activeTreble && activeClef==='treble'}
                 eraseMode={eraseMode}
+                slurMode={slurMode}
                 selDur={selDur} selArt={selArt} selAcc={selAcc} keySig={keySig} timeSig={timeSig}
                 onAddNote={nd => { setActiveClef('treble'); setActiveTreble(vi); addNote('treble', vi, nd); }}
                 onAddRest={beat => { setActiveClef('treble'); setActiveTreble(vi); addRestAtBeat('treble', vi, selDur, beat); }}
                 onDeleteNote={idx => deleteLast('treble', vi, idx)}
+                onSlurNote={idx => slurNote('treble', vi, idx)}
+                onEditNote={(idx, patch) => editNote('treble', vi, idx, patch)}
                 playingBar={playingBar}
                 totalBeatsRef={totalBeatsRef}
               />
@@ -1533,10 +1794,13 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
                 voiceIdx={vi}
                 isActive={vi===activeBass && activeClef==='bass'}
                 eraseMode={eraseMode}
+                slurMode={slurMode}
                 selDur={selDur} selArt={selArt} selAcc={selAcc} keySig={keySig} timeSig={timeSig}
                 onAddNote={nd => { setActiveClef('bass'); setActiveBass(vi); addNote('bass', vi, nd); }}
                 onAddRest={beat => { setActiveClef('bass'); setActiveBass(vi); addRestAtBeat('bass', vi, selDur, beat); }}
                 onDeleteNote={idx => deleteLast('bass', vi, idx)}
+                onSlurNote={idx => slurNote('bass', vi, idx)}
+                onEditNote={(idx, patch) => editNote('bass', vi, idx, patch)}
                 playingBar={playingBar}
                 totalBeatsRef={totalBeatsRef}
               />
