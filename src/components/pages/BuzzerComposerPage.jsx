@@ -109,13 +109,19 @@ const BASS_ROWS = [
   { note:'G3', row:2 },
   { note:'F3', row:3 },
   { note:'E3', row:4 },
-  { note:'D3', row:5 }, // ✅ aligned
+  { note:'D3', row:5 },
   { note:'C3', row:6 },
   { note:'B2', row:7 },
+  { note:'A2', row:8 },
+  { note:'G2', row:9 },
+  { note:'F2', row:10 },
+  { note:'E2', row:11 },
+  { note:'D2', row:12 },
+  { note:'C2', row:13 },
 ];
 const BASS_LINES   = [1, 3, 5, 7, 9];
 const BASS_ROW_MIN = -2;
-const BASS_ROW_MAX = 10;
+const BASS_ROW_MAX = 13;
 
 // ─── KEY SIGNATURES ───────────────────────────────────────────────────────────
 const KEY_SIGNATURES = {
@@ -138,10 +144,32 @@ const BASS_FLAT_ROW    = { B:1, E:4, A:2, D:6, G:3 };
 
 // ─── DURATIONS / ARTICULATIONS / ACCIDENTALS ──────────────────────────────────
 const DURATIONS = [
-  {value:0.25,label:'16th'},{value:0.5,label:'8th'},{value:0.75,label:'8th·'},
-  {value:1.0,label:'qtr'},{value:1.5,label:'qtr·'},
-  {value:2.0,label:'half'},{value:3.0,label:'hlf·'},{value:4.0,label:'whole'},
+  {value:0.25,  label:'16th'},
+  {value:1/6,   label:'16t',  triplet:true},
+  {value:0.5,   label:'8th'},
+  {value:1/3,   label:'8t',   triplet:true},
+  {value:0.75,  label:'8th·'},
+  {value:1.0,   label:'qtr'},
+  {value:2/3,   label:'qt',   triplet:true},
+  {value:1.5,   label:'qtr·'},
+  {value:2.0,   label:'half'},
+  {value:3.0,   label:'hlf·'},
+  {value:4.0,   label:'whole'},
 ];
+// Triplet duration values (pre-computed to avoid floating point in comparisons)
+const TRIPLET_DURATIONS = new Set(DURATIONS.filter(d => d.triplet).map(d => d.value));
+function isTriplet(dur) {
+  // Compare with tolerance since 1/3, 2/3, 1/6 are repeating decimals
+  return DURATIONS.some(d => d.triplet && Math.abs(d.value - dur) < 0.0005);
+}
+function tripletBase(dur) {
+  // Returns the "regular" base value the triplet is derived from
+  // qt (2/3) → qtr (1.0); 8t (1/3) → 8th (0.5); 16t (1/6) → 16th (0.25)
+  if (Math.abs(dur - 2/3) < 0.0005) return 1.0;
+  if (Math.abs(dur - 1/3) < 0.0005) return 0.5;
+  if (Math.abs(dur - 1/6) < 0.0005) return 0.25;
+  return dur;
+}
 const ARTICULATIONS = [
   {value:'reg',      label:'reg'},
   {value:'stac',     label:'stac'},
@@ -226,13 +254,15 @@ function drawLedgerLines(ctx, x, row, lines, rToY, staffTop, color) {
 }
 
 function drawRest(ctx, duration, cx, midLineY, color) {
+  const trip    = isTriplet(duration);
+  const drawDur = trip ? tripletBase(duration) : duration;
   ctx.save();
   ctx.fillStyle = color; ctx.strokeStyle = color;
-  if (duration >= 4.0) {
-    ctx.fillRect(cx - 6, midLineY, 12, 4);        // was 9, 18, 6
-  } else if (duration >= 2.0) {
-    ctx.fillRect(cx - 6, midLineY - 4, 12, 4);    // was 9, 18, 6
-  } else if (duration >= 1.0) {
+  if (drawDur >= 4.0) {
+    ctx.fillRect(cx - 6, midLineY, 12, 4);
+  } else if (drawDur >= 2.0) {
+    ctx.fillRect(cx - 6, midLineY - 4, 12, 4);
+  } else if (drawDur >= 1.0) {
     ctx.lineWidth = 1.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(cx+3, midLineY-7); ctx.lineTo(cx-2, midLineY-3);
@@ -240,7 +270,7 @@ function drawRest(ctx, duration, cx, midLineY, color) {
     ctx.bezierCurveTo(cx-5, midLineY+8, cx-3, midLineY+11, cx+1, midLineY+11);
     ctx.moveTo(cx-1, midLineY+4);  ctx.lineTo(cx+3, midLineY+6);
     ctx.stroke();
-  } else if (duration >= 0.5) {
+  } else if (drawDur >= 0.5) {
     ctx.lineWidth = 1.1;
     ctx.beginPath(); ctx.moveTo(cx-1, midLineY+6); ctx.lineTo(cx+2, midLineY-5); ctx.stroke();
     ctx.beginPath(); ctx.arc(cx+3, midLineY-4, 2.2, 0, Math.PI*2); ctx.fill();
@@ -250,20 +280,27 @@ function drawRest(ctx, duration, cx, midLineY, color) {
     ctx.beginPath(); ctx.arc(cx+3, midLineY-4, 2.0, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(cx+1, midLineY+1, 2.0, 0, Math.PI*2); ctx.fill();
   }
-  ctx.fillStyle = color + '77';
-  ctx.font = '5px "Roboto Mono",monospace';     // was 7px
+  ctx.fillStyle = `${color}77`;
+  ctx.font = '5px "Roboto Mono",monospace';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  const dur = DURATIONS.find(d => d.value === duration);
-  if (dur) ctx.fillText(dur.label, cx, midLineY + 14);   // was +22
+  const dur = DURATIONS.find(d => Math.abs(d.value - duration) < 0.0005);
+  if (dur) ctx.fillText(dur.label, cx, midLineY + 14);
+  if (trip) {
+    ctx.font = 'bold 7px "Roboto Mono",monospace';
+    ctx.fillStyle = color;
+    ctx.fillText('3', cx, midLineY - 22);
+  }
   ctx.restore();
 }
 
 
 function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
-  const hollow = duration >= 2.0;
-  const whole  = duration >= 4.0;
-  const isDotted = [0.75, 1.5, 3.0].includes(duration);
-  const baseDur  = isDotted ? duration / 1.5 : duration;
+  const trip    = isTriplet(duration);
+  const drawDur = trip ? tripletBase(duration) : duration; // visual shape based on base dur
+  const hollow  = drawDur >= 2.0;
+  const whole   = drawDur >= 4.0;
+  const isDotted = [0.75, 1.5, 3.0].includes(drawDur);
+  const baseDur  = isDotted ? drawDur / 1.5 : drawDur;
 
   ctx.save();
   ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.2;
@@ -291,6 +328,17 @@ function drawNoteHead(ctx, cx, cy, duration, color, stemUp, articulation) {
   if (isDotted) {
     ctx.fillStyle = color;
     ctx.beginPath(); ctx.arc(cx+7, cy-1, 1.5, 0, Math.PI*2); ctx.fill();  // was cx+10, 2.1
+  }
+  // Triplet numeral — small '3' above/below the note
+  if (trip) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.font = 'bold 7px "Roboto Mono",monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const numY = stemUp ? cy - 34 : cy + 34;
+    ctx.fillText('3', cx, numY);
+    ctx.restore();
   }
   if (articulation === 'stac') {
     ctx.fillStyle = color;
@@ -686,6 +734,68 @@ function StaffCanvas({
           }
         }
       }
+      // ─── TRIPLET BRACKETS ──────────────────────────────────────────────
+      // Find runs of consecutive triplet notes on this line and draw a bracket + '3'
+      {
+        let ti = 0;
+        while (ti < lineNotes.length) {
+          const ln = lineNotes[ti];
+          if (!isTriplet(ln.note.duration)) { ti++; continue; }
+
+          // Collect consecutive triplets of the same base duration starting at ti
+          const baseDur = tripletBase(ln.note.duration);
+          let groupEnd = ti;
+          while (
+            groupEnd + 1 < lineNotes.length &&
+            isTriplet(lineNotes[groupEnd + 1].note.duration) &&
+            Math.abs(tripletBase(lineNotes[groupEnd + 1].note.duration) - baseDur) < 0.0005
+          ) groupEnd++;
+
+          const groupNotes = lineNotes.slice(ti, groupEnd + 1);
+          const xs = groupNotes.map(n => noteXMap.get(n.idx)).filter(x => x !== undefined);
+          if (xs.length >= 2) {
+            const x1 = Math.min(...xs) - 6;
+            const x2 = Math.max(...xs) + 6;
+            const mx  = (x1 + x2) / 2;
+            // Use the average y of the group — bracket sits above for treble, below for bass
+            const ys = groupNotes.map(n => {
+              const rowObj = rows.find(r => r.note === n.note.note);
+              return rowObj ? getYFromRow(rowObj.row, staffTop) : midY;
+            });
+            const avgNoteY = ys.reduce((a, b) => a + b, 0) / ys.length;
+            const bracketDir = isT ? -1 : 1; // -1 = above (treble), +1 = below (bass)
+            const bracketY = avgNoteY + bracketDir * 38;
+            const tickH = 5;
+
+            ctx.save();
+            ctx.strokeStyle = voiceColor;
+            ctx.fillStyle   = voiceColor;
+            ctx.lineWidth   = 1;
+            ctx.globalAlpha = 0.75;
+
+            // Left tick
+            ctx.beginPath();
+            ctx.moveTo(x1, bracketY + tickH * bracketDir);
+            ctx.lineTo(x1, bracketY);
+            ctx.lineTo(mx - 5, bracketY);
+            ctx.stroke();
+            // Right tick
+            ctx.beginPath();
+            ctx.moveTo(mx + 5, bracketY);
+            ctx.lineTo(x2, bracketY);
+            ctx.lineTo(x2, bracketY + tickH * bracketDir);
+            ctx.stroke();
+            // '3' numeral in the gap
+            ctx.font = 'bold 8px "Roboto Mono",monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.globalAlpha = 1;
+            ctx.fillText('3', mx, bracketY);
+            ctx.restore();
+          }
+          ti = groupEnd + 1;
+        }
+      }
       // ─── SLUR ARCS ─────────────────────────────────────────────────────
       // Find all slur_start → slur_end spans on this line and draw a curved arc
       {
@@ -1033,7 +1143,7 @@ else if (n.accidental === 'natural') acc = '♮';
                   borderRadius:5, padding:'4px 6px', minWidth:44, opacity: isAuto ? 0.55 : 1 }}>
                   <span style={{ fontFamily:'"Roboto Mono",monospace', fontSize:'0.6rem', color:'#aaa', marginBottom:1 }}>{ni+1}</span>
                   <span style={{ fontFamily:'"Roboto Mono",monospace', fontSize:'0.76rem', fontWeight:700, color: isAuto ? '#aaa' : colors[vi] }}>{n.note}{acc}</span>
-                  <span style={{ fontFamily:'"Roboto Mono",monospace', fontSize:'0.55rem', color:'#999' }}>{n.duration}b</span>
+                  <span style={{ fontFamily:'"Roboto Mono",monospace', fontSize:'0.55rem', color:'#999' }}>{DURATIONS.find(d=>Math.abs(d.value-n.duration)<0.0005)?.label ?? `${n.duration}b`}</span>
                   <button onClick={() => onDelete(vi, ni)}
                     style={{ marginTop:3, background:'none', border:'1px solid #e0a0a0', color:'#c86e6e', cursor:'pointer', borderRadius:3, fontFamily:'"Roboto Mono",monospace', fontSize:'0.55rem', padding:'1px 5px', opacity:0.7 }}
                     onMouseEnter={e => e.target.style.opacity=1}
@@ -1131,8 +1241,12 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
   const [showPreview, setShowPreview] = useState(false);
   const [toast, setToast] = useState(null);
   const [playingBar, setPlayingBar] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [eraseMode, setEraseMode] = useState(false);
   const [slurMode, setSlurMode] = useState(false);
+
+  const audioCtxRef  = useRef(null); // active AudioContext — close() to stop
+  const barTimersRef = useRef([]);   // setTimeout ids for bar highlight
 
   const [xApiKey, setXApiKey] = useState('');
   const [tunnelUrl, setTunnelUrl] = useState('');
@@ -1179,6 +1293,12 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
         case '6': setSelDur(2.0);  showToast('Half note'); break;
         case '7': setSelDur(3.0);  showToast('Half dotted'); break;
         case '8': setSelDur(4.0);  showToast('Whole note'); break;
+        // 9 cycles through triplets: 16t → 8t → qt → 16t
+        case '9': setSelDur(prev => {
+          if (Math.abs(prev - 1/6) < 0.0005) { showToast('8th triplet'); return 1/3; }
+          if (Math.abs(prev - 1/3) < 0.0005) { showToast('Quarter triplet'); return 2/3; }
+          showToast('16th triplet'); return 1/6;
+        }); break;
 
         // Accidentals: n=natural, s=sharp, f=flat, r=regular
         case 'n': setSelAcc('natural'); showToast('♮ Natural'); break;
@@ -1246,7 +1366,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
           showToast('Deleted last note');
           break;
 
-        // Space = play
+        // Space = toggle play/stop
         case ' ':
           e.preventDefault();
           handlePlayRef.current?.();
@@ -1268,11 +1388,12 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
       if (!e.shiftKey) return; // let normal scroll through
       e.preventDefault();
       setSelDur(prev => {
-        const idx = durValues.indexOf(prev);
-        const next = e.deltaY > 0
-          ? durValues[Math.max(idx - 1, 0)]
-          : durValues[Math.min(idx + 1, durValues.length - 1)];
-        showToast(DURATIONS.find(d => d.value === next)?.label ?? '');
+        const idx = durValues.findIndex(v => Math.abs(v - prev) < 0.0005);
+        const nextIdx = e.deltaY > 0
+          ? Math.max(idx - 1, 0)
+          : Math.min(idx + 1, durValues.length - 1);
+        const next = durValues[nextIdx];
+        showToast(DURATIONS.find(d => Math.abs(d.value - next) < 0.0005)?.label ?? '');
         return next;
       });
     };
@@ -1349,21 +1470,23 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
     osc.stop(startT + playDur);
   }
 
-  function playVoice(voice, audioCtx, keySig, rollStaggerSec = 0) {
+  function playVoice(voice, audioCtx, keySig, startTime, voiceRollOffset = 0) {
     const beatMs  = 60000 / tempo;
-    const GRACE_S = 0.085; // matches ESP32 GRACE_MS = 85
-    let t = audioCtx.currentTime + rollStaggerSec;
-    let graceDebt = 0; // seconds already consumed by preceding grace note
+    const beatS   = beatMs / 1000;
+    const GRACE_S = 0.085;
+    // t tracks absolute beat position in seconds from startTime (no roll offset here —
+    // roll offset only shifts the individual note's sound onset, not the beat cursor)
+    let t = startTime;
+    let graceDebt = 0;
     let inSlur = false;
 
     for (let i = 0; i < voice.length; i++) {
       const note   = voice[i];
       const type   = note.type || 'reg';
-      const totalS = Math.max((note.duration * beatMs) / 1000 - graceDebt, 0.01);
+      const totalS = Math.max(note.duration * beatS - graceDebt, 0.01);
       graceDebt = 0;
 
       if (type === 'grace') {
-        // Grace: play for GRACE_S, steal that time from next note
         const freq = getFrequency(note, keySig);
         if (freq && note.note !== 'Rest') scheduleNote(audioCtx, freq, t, GRACE_S * 0.9, GRACE_S, 'square', 0.3);
         t += GRACE_S;
@@ -1371,23 +1494,23 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
         continue;
       }
 
-      // Slur tracking
       if (type === 'slur_start') inSlur = true;
 
       const freq = getFrequency(note, keySig);
 
-      // Compute playDur based on articulation
       let playDur;
-      if (type === 'stac')                   playDur = totalS * 0.5;
-      else if (type === 'legato')            playDur = totalS;
-      else if (inSlur)                       playDur = totalS; // no gap inside slur
-      else if (type === 'roll')              playDur = totalS * 0.92;
-      else                                   playDur = totalS * 0.8; // reg
+      if (type === 'stac')        playDur = totalS * 0.5;
+      else if (type === 'legato') playDur = totalS;
+      else if (inSlur)            playDur = totalS;
+      else if (type === 'roll')   playDur = totalS * 0.92;
+      else                        playDur = totalS * 0.8;
 
       if (type === 'slur_end') inSlur = false;
 
       if (note.note !== 'Rest' && freq) {
-        scheduleNote(audioCtx, freq, t, playDur, totalS);
+        // Roll notes get a per-voice stagger; all other types play exactly on the beat
+        const onset = type === 'roll' ? t + voiceRollOffset : t;
+        scheduleNote(audioCtx, freq, onset, playDur, totalS);
       }
 
       t += totalS;
@@ -1396,29 +1519,60 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
 
   const handlePlayRef = useRef(null);
 
-  const handlePlay = async () => {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();    const beatMs = 60000 / tempo;
-    const beatsPerBar = timeSig === '3/4' ? 3 : 4;
-    const allVoices = [...treble, ...bass];
-    const totalBeats = Math.max(...allVoices.map(v => v.reduce((s,n)=>s+n.duration,0)), beatsPerBar);
-    const totalBars = Math.ceil(totalBeats / beatsPerBar);
-
-    setPlayingBar(0);
-    for (let bar = 0; bar < totalBars; bar++) {
-      setTimeout(() => setPlayingBar(bar), bar * beatsPerBar * beatMs);
+  const stopPlayback = () => {
+    // Cancel bar-highlight timers
+    barTimersRef.current.forEach(id => clearTimeout(id));
+    barTimersRef.current = [];
+    setPlayingBar(null);
+    setIsPlaying(false);
+    // Close the AudioContext — this immediately silences all scheduled nodes
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
     }
-    setTimeout(() => setPlayingBar(null), totalBars * beatsPerBar * beatMs);
+  };
 
-    // Roll stagger: ESP32 plays bass→treble with 25ms between each channel.
-    // Voices order: [treble0, treble1, treble2, bass0, bass1, bass2]
-    // Roll order bass→treble: bass2, bass1, bass0, treble2, treble1, treble0
+  const handlePlay = async () => {
+    // If already playing, stop
+    if (isPlaying) {
+      stopPlayback();
+      return;
+    }
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    audioCtxRef.current = audioCtx;
+    setIsPlaying(true);
+
+    const beatMs     = 60000 / tempo;
+    const beatsPerBar = timeSig === '3/4' ? 3 : 4;
+    const allVoices  = [...treble, ...bass];
+    const totalBeats = Math.max(...allVoices.map(v => v.reduce((s,n)=>s+n.duration,0)), beatsPerBar);
+    const totalBars  = Math.ceil(totalBeats / beatsPerBar);
+
+    // Schedule bar highlight timers, store ids so we can cancel on stop
+    const timers = [];
+    for (let bar = 0; bar < totalBars; bar++) {
+      timers.push(setTimeout(() => setPlayingBar(bar), bar * beatsPerBar * beatMs));
+    }
+    timers.push(setTimeout(() => {
+      setPlayingBar(null);
+      setIsPlaying(false);
+      audioCtxRef.current = null;
+    }, totalBars * beatsPerBar * beatMs));
+    barTimersRef.current = timers;
+
+    // All voices share the exact same startTime — this guarantees simultaneous notes
+    // are played together regardless of voice index
+    const startTime = audioCtx.currentTime + 0.05;
+
+    // Roll stagger: bass→treble, 25ms each — only applied to notes typed 'roll'
     const ROLL_STEP_S = 0.025;
-    const rollOrder = [5, 4, 3, 2, 1, 0]; // indices into allVoices
+    const rollOrder   = [5, 4, 3, 2, 1, 0]; // bass2, bass1, bass0, treble2, treble1, treble0
     allVoices.forEach((v, vi) => {
-      const rollPos = rollOrder.indexOf(vi);
-      const stagger = rollPos >= 0 ? rollPos * ROLL_STEP_S : 0;
-      playVoice(v, audioCtx, keySig, stagger);
+      const rollPos   = rollOrder.indexOf(vi);
+      const rollOffset = rollPos >= 0 ? rollPos * ROLL_STEP_S : 0;
+      playVoice(v, audioCtx, keySig, startTime, rollOffset);
     });
   };
   handlePlayRef.current = handlePlay;
@@ -1488,7 +1642,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
       next[vi] = [...next[vi], { note:'Rest', duration:dur, type:'reg', accidental:'natural' }];
       return next;
     });
-    showToast(`+ Rest (${DURATIONS.find(d=>d.value===dur)?.label||dur}) → ${clef} V${vi+1}`);
+    showToast(`+ Rest (${DURATIONS.find(d=>Math.abs(d.value-dur)<0.0005)?.label||dur}) → ${clef} V${vi+1}`);
   }, []);
 
   // Add a rest at a specific beat position (right-click behavior)
@@ -1708,6 +1862,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
           <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap' }}>
             {[
               ['1–8', 'Duration (16th → whole)'],
+              ['9', 'Triplet (16t / 8t / qt, cycles)'],
               ['Shift+scroll', 'Duration ↕'],
               ['r/n/s/f', 'Accidental (reg/nat/sharp/flat)'],
               ['q/w/e', 'Art: reg / stac / legato'],
@@ -1841,7 +1996,7 @@ const BuzzerComposerPage = ({ setCurrentPage }) => {
             <Btn onClick={() => downloadFile(generateHeader(title,tempo,treble,bass), `${title}.h`)}>📥 Export .h</Btn>
             <Btn onClick={() => downloadFile(JSON.stringify({title,tempo,treble,bass},null,2), `${title}.json`, 'application/json')}>📥 Export JSON</Btn>
             <Btn onClick={() => setShowPreview(p => !p)}>{'{ }'} Preview</Btn>
-            <Btn primary onClick={handlePlay}>▶ Play</Btn>
+            <Btn primary onClick={handlePlay}>{isPlaying ? '■ Stop' : '▶ Play'}</Btn>
           </div>
           {showPreview && (
             <pre style={{ ...M, fontSize:'0.6rem', color:textMuted, background:'#f5f4f0', border:`1px solid ${border}`, borderRadius:4, padding:'0.8rem', marginTop:'0.8rem', maxHeight:200, overflowY:'auto', lineHeight:1.6, whiteSpace:'pre-wrap', wordBreak:'break-all' }}>
